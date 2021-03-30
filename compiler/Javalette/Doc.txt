@@ -39,7 +39,7 @@ The set of reserved words is the set of terminals appearing in the grammar. Thos
 The reserved words used in javalette are the following:
   | ``boolean`` | ``double`` | ``else`` | ``false``
   | ``if`` | ``int`` | ``return`` | ``true``
-  | ``voi`` | ``void`` | ``while`` |
+  | ``void`` | ``while`` |  |
 
 The symbols used in javalette are the following:
   | ( | ) | , | {
@@ -89,7 +89,6 @@ All other symbols are terminals.
   |  |  **|**  | ``double``
   |  |  **|**  | ``boolean``
   |  |  **|**  | ``void``
-  |  |  **|**  | ``voi``
   | //[Type]// | -> | **eps**
   |  |  **|**  | //Type//
   |  |  **|**  | //Type// ``,`` //[Type]//

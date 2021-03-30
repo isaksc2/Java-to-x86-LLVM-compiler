@@ -42,8 +42,7 @@ data Stmt
 data Item = NoInit Ident | Init Ident Expr
   deriving (C.Eq, C.Ord, C.Show, C.Read)
 
-data Type
-    = Int | Doub | Bool | Void | Voi | String | Fun Type [Type]
+data Type = Int | Doub | Bool | Void | String | Fun Type [Type]
   deriving (C.Eq, C.Ord, C.Show, C.Read)
 
 data Expr
@@ -61,6 +60,9 @@ data Expr
     | ERel Expr RelOp Expr
     | EAnd Expr Expr
     | EOr Expr Expr
+  deriving (C.Eq, C.Ord, C.Show, C.Read)
+
+data Exp = ETyped Exp Type
   deriving (C.Eq, C.Ord, C.Show, C.Read)
 
 data AddOp = Plus | Minus

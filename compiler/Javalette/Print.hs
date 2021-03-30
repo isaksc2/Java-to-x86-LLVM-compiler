@@ -163,7 +163,6 @@ instance Print Javalette.Abs.Type where
     Javalette.Abs.Doub -> prPrec i 0 (concatD [doc (showString "double")])
     Javalette.Abs.Bool -> prPrec i 0 (concatD [doc (showString "boolean")])
     Javalette.Abs.Void -> prPrec i 0 (concatD [doc (showString "void")])
-    Javalette.Abs.Voi -> prPrec i 0 (concatD [doc (showString "voi")])
     Javalette.Abs.String -> prPrec i 0 (concatD [doc (showString "string")])
     Javalette.Abs.Fun type_ types -> prPrec i 0 (concatD [prt 0 type_, doc (showString "("), prt 0 types, doc (showString ")")])
   prtList _ [] = concatD []
@@ -192,6 +191,10 @@ instance Print Javalette.Abs.Expr where
   prtList _ [] = concatD []
   prtList _ [x] = concatD [prt 0 x]
   prtList _ (x:xs) = concatD [prt 0 x, doc (showString ","), prt 0 xs]
+
+instance Print Javalette.Abs.Exp where
+  prt i e = case e of
+    Javalette.Abs.ETyped exp type_ -> prPrec i 0 (concatD [doc (showString "["), prt 0 exp, doc (showString ":"), prt 0 type_, doc (showString "]")])
 
 instance Print [Javalette.Abs.Expr] where
   prt = prtList

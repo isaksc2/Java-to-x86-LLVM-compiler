@@ -39,12 +39,11 @@ import Javalette.Lex
   'int' { PT _ (TS _ 26) }
   'return' { PT _ (TS _ 27) }
   'true' { PT _ (TS _ 28) }
-  'voi' { PT _ (TS _ 29) }
-  'void' { PT _ (TS _ 30) }
-  'while' { PT _ (TS _ 31) }
-  '{' { PT _ (TS _ 32) }
-  '||' { PT _ (TS _ 33) }
-  '}' { PT _ (TS _ 34) }
+  'void' { PT _ (TS _ 29) }
+  'while' { PT _ (TS _ 30) }
+  '{' { PT _ (TS _ 31) }
+  '||' { PT _ (TS _ 32) }
+  '}' { PT _ (TS _ 33) }
   L_Ident  { PT _ (TV $$) }
   L_integ  { PT _ (TI $$) }
   L_doubl  { PT _ (TD $$) }
@@ -113,7 +112,6 @@ Type : 'int' { Javalette.Abs.Int }
      | 'double' { Javalette.Abs.Doub }
      | 'boolean' { Javalette.Abs.Bool }
      | 'void' { Javalette.Abs.Void }
-     | 'voi' { Javalette.Abs.Voi }
 
 ListType :: { [Javalette.Abs.Type] }
 ListType : {- empty -} { [] }

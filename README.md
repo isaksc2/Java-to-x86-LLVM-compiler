@@ -4,14 +4,31 @@ compiler
 
 how to run
 
-bnfc -dm javalette.cf
-eller bnfc javalette.cf
+---
+
+---
+
+---
+
+bnfc -d javalette.cf in src
+make in src
+
+---
+
+---
+
+---
+
+i compiler:
+bnfc -dm src/javalette.cf
 
 cd c:;cd "\_it\git repos\TDA283\test"
 
-tar -czvf partA-1.tar.gz ../compiler
+tar -czvf partA-1.tar.gz -C ../compiler .
 
 python3 testing.py partA-1.tar.gz
+
+cd ../compiler; make vclean; cd ../test
 
 javalette desc
 int main() must exist

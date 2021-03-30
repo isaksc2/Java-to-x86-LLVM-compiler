@@ -49,7 +49,6 @@ transType x = case x of
   Javalette.Abs.Doub -> failure x
   Javalette.Abs.Bool -> failure x
   Javalette.Abs.Void -> failure x
-  Javalette.Abs.Voi -> failure x
   Javalette.Abs.String -> failure x
   Javalette.Abs.Fun type_ types -> failure x
 transExpr :: Javalette.Abs.Expr -> Result
@@ -68,6 +67,9 @@ transExpr x = case x of
   Javalette.Abs.ERel expr1 relop expr2 -> failure x
   Javalette.Abs.EAnd expr1 expr2 -> failure x
   Javalette.Abs.EOr expr1 expr2 -> failure x
+transExp :: Javalette.Abs.Exp -> Result
+transExp x = case x of
+  Javalette.Abs.ETyped exp type_ -> failure x
 transAddOp :: Javalette.Abs.AddOp -> Result
 transAddOp x = case x of
   Javalette.Abs.Plus -> failure x
