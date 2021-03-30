@@ -9,6 +9,8 @@ eller bnfc javalette.cf
 
 cd c:;cd "\_it\git repos\TDA283\test"
 
+tar -czvf partA-1.tar.gz ../compiler
+
 python3 testing.py partA-1.tar.gz
 
 javalette desc
