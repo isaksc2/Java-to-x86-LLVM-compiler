@@ -5,6 +5,11 @@ compiler
 how to run
 
 bnfc -dm javalette.cf
+eller bnfc javalette.cf
+
+cd c:;cd "\_it\git repos\TDA283\test"
+
+python3 testing.py partA-1.tar.gz
 
 javalette desc
 int main() must exist
@@ -62,3 +67,5 @@ func def can come after call
 parameter pass by value
 
 parameters act as local variables that can be assgiend new value
+
+man ska inte kunna ha int foo(String s)
