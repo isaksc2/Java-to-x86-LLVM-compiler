@@ -60,9 +60,7 @@ data Expr
     | ERel Expr RelOp Expr
     | EAnd Expr Expr
     | EOr Expr Expr
-  deriving (C.Eq, C.Ord, C.Show, C.Read)
-
-data Exp = ETyped Exp Type
+    | ETyped Expr Type
   deriving (C.Eq, C.Ord, C.Show, C.Read)
 
 data AddOp = Plus | Minus

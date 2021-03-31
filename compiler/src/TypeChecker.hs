@@ -148,11 +148,9 @@ inferExp env x = case x of
       then Bad $ "incorrect number of arguments for function " ++ show id
       else do
         let pairs  = zip argsT args2
-        let argsT' = coerceTargets pairs
-        if (checkTypes argsT' args2)
+        if (checkTypes argsT args2)
           then do
-            let argsT'' = map fst argsT'
-            return (ETyped (EApp id argsT'') result)
+            return (ETyped (EApp id argsT) result)
           else Bad $ "arguments have incorrect type for function " ++ show id
 
   EMul exp1 op exp2 -> do
@@ -166,15 +164,13 @@ inferExp env x = case x of
   ERel exp1 op exp2 -> do
     (e1, typ1)         <- inferExp env exp1 >>= unwrap
     (e2, typ2)         <- inferExp env exp2 >>= unwrap
-    (exp3, exp4, typ3) <- coerce (e1, typ1) (e2, typ2)
-    if ((op /= EQU && op /= NE ) && typ3 == Bool)
-      then
-        Bad
-        $  "can't compare bools: "
-        ++ printTree exp1
-        ++ " and "
-        ++ printTree exp2
-      else return (ETyped (ERel exp3 op exp4) Bool)
+    if (typ1 /= typ2)
+      then Bad ("cant compare different types " ++ printTree exp1 ++ " and " ++ printTree exp2)
+      else do
+        if ((op /= EQU && op /= NE ) && typ1 == Bool)
+          then
+            Bad ( "can't compare bools: "++ printTree exp1++ " and " ++ printTree exp2 ++ " with operators other than == and !=" )
+          else return (ETyped (ERel e1 op e2) Bool)
 
   EAnd exp1 exp2 -> do
     (exp3, exp4, typ) <- inferBin [Bool] env exp1 exp2
@@ -187,21 +183,21 @@ inferExp env x = case x of
   Neg exp -> do
     (exp', t) <- inferExp env exp >>= unwrap
     if (t == Int || t == Doub)
-      then (Etyped (Neg exp') t)
-      else Bad $ "can only do negative on numbers, type found: " printTree t
+      then return (ETyped (Neg exp') t)
+      else Bad ( "can only do negative on numbers, type found: " ++ printTree t )
 
   Not exp -> do
     checkExp env Bool exp
     exp' <- inferExp env exp 
-    return (Etyped (Not exp') Bool)
+    return (ETyped (Not exp') Bool)
     
   ETyped e t -> inferExp env e
 
 
 -- check if a list of expressions have the correct given types
-checkTypes :: [(Expr, Type)] -> [Type] -> Bool
-checkTypes []             []        = True
-checkTypes ((e, t) : ets) (t2 : ts) = t == t2 && checkTypes ets ts
+checkTypes :: [Expr] -> [Type] ->  Bool
+checkTypes [] [] = True
+checkTypes ((ETyped _ t1) : es) (t2 : ts) = t1 == t2 && checkTypes es ts
 
 -- type annotate operands of a binary operation, the first argument is the allowed types for a given operator
 inferBin :: [Type] -> Env -> Expr -> Expr -> Err (Expr, Expr, Type)
@@ -211,7 +207,7 @@ inferBin types env exp1 exp2 = do
 
   if (elem typ1 types && typ1 == typ2)
     then
-      (exp1, exp2, typ1)
+      return (exp1, exp2, typ1)
     else
       Bad
       $  "type of "
@@ -243,17 +239,17 @@ checkExp env typ exp = do
 
 -- helper for checkStm, htype check and annotate list of declarations
 checkDecls :: Env -> Type -> [Item] -> Err (Env, [Item])
-checkDecls e t (id:items) = do
+checkDecls e t (NoInit id:items) = do
   e' <- addVar e id t
   (e'', items') <- checkDecls e' t items
-  return (e'', id:items')
-checkDecls e t ((Init id exp):items) = do     ---------------------------- idk why i had to add "Init"
+  return (e'', NoInit id:items')
+checkDecls e t ((Init id exp):items) = do
   checkExp e t exp
   exp' <- inferExp e exp
   e' <- addVar e id t
-  (e'', items') <- checkDecl e' t items
-  return (e'', (id exp'):items')
-checkDecls e t [] = (e, [])
+  (e'', items') <- checkDecls e' t items
+  return (e'', (Init id exp'):items')
+checkDecls e t [] = return (e, [])
 
 
 -- type check and annotate statement
@@ -267,7 +263,7 @@ checkStm env val x = case x of
     if (typ == String)
       then Bad "variable cant have type string"
       else do
-        (env', items') <- checkDecls typ items
+        (env', items') <- checkDecls env typ items
         return (env', Decl typ items')
 
   Ret exp -> do
@@ -277,8 +273,8 @@ checkStm env val x = case x of
 
   VRet -> do
     if (val == Void)
-      then (env, VRet)
-      else Bad "returns void but expected " ++ printTree val
+      then return (env, VRet)
+      else Bad ( "returns void but expected " ++ printTree val )
 
   While exp stm -> do
     checkExp env Bool exp
@@ -287,17 +283,17 @@ checkStm env val x = case x of
     exp'      <- inferExp env exp
     return (env, While exp' stm')
 
-  BStmt ss -> do
+  BStmt (Block ss) -> do
     let env' = (fst env, Map.empty : snd env)
     (_, ss') <- checkStms env' val ss
-    return (env, Bstmt ss')
+    return (env, BStmt (Block ss'))
 
   Cond exp s -> do
     checkExp env Bool exp
     let env' = (fst env, Map.empty : snd env) -----------------------newblock
     (_, s') <- checkStm env' val s
     exp'    <- inferExp env exp
-    return (env, Cond exp' s1' s2')
+    return (env, Cond exp' s')
 
   CondElse exp s1 s2 -> do
     checkExp env Bool exp
@@ -312,44 +308,26 @@ checkStm env val x = case x of
     (e, typ2) <- inferExp env exp >>= unwrap
     if (typ == typ2) -------------------------------------------------- use checkexp?
       then return (env , Ass id e )
-      else
-        Bad
-        $  "variable "
-        ++ show id
-        ++ " has type "
-        ++ printTree typ
-        ++ ", cant assign expression of type "
-        ++ printTree typ'
+      else Bad ( "variable " ++ show id ++ " has type " ++ printTree typ ++ ", cant assign expression of different type " ++ printTree typ2 )
     
   Incr id -> do
     typ <- lookupVar env id
     if (typ == Int || typ == Doub)
       then return (env, x)
       else
-        Bad
-        $  "type "
-        ++ printTree typ
-        ++ "of variable "
-        ++ show id
-        ++ " cant be incremented"
+        Bad ( "type " ++ printTree typ ++ "of variable " ++ show id ++ " cant be incremented" )
 
   Decr id -> do
     typ <- lookupVar env id
     if (typ == Int || typ == Doub)
       then return (env, x)
-      else
-        Bad
-        $  "type "
-        ++ printTree typ
-        ++ "of variable "
-        ++ show id
-        ++ " cant be decremented"
+      else  Bad ( "type " ++ printTree typ ++ "of variable " ++ show id ++ " cant be decremented" )
 
   SExp exp -> do
     exp' <- inferExp env exp
-    return (SExp exp')
+    return (env, SExp exp')
   
-  Empty -> (env, x)
+  Empty -> return (env, x)
 
 
 
@@ -365,10 +343,10 @@ checkStms env typ (s : ss) = do
 
 -- type check dunction and return it with a type annotated body
 checkFun :: Env -> TopDef -> Err (Env, TopDef)
-checkFun env (FnDef result id args ss) = do
+checkFun env (FnDef result id args (Block ss)) = do
   env'     <- addArgs env args
   (_, ss') <- checkStms env' result ss
-  return (env, FnDef result id args ss')
+  return (env, FnDef result id args (Block ss'))
 
 -- add the given functions to the environment
 addFuns :: Env -> [TopDef] -> Err Env

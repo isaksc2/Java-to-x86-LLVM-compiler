@@ -67,9 +67,7 @@ transExpr x = case x of
   Javalette.Abs.ERel expr1 relop expr2 -> failure x
   Javalette.Abs.EAnd expr1 expr2 -> failure x
   Javalette.Abs.EOr expr1 expr2 -> failure x
-transExp :: Javalette.Abs.Exp -> Result
-transExp x = case x of
-  Javalette.Abs.ETyped exp type_ -> failure x
+  Javalette.Abs.ETyped expr type_ -> failure x
 transAddOp :: Javalette.Abs.AddOp -> Result
 transAddOp x = case x of
   Javalette.Abs.Plus -> failure x

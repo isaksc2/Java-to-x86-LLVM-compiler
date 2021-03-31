@@ -16,7 +16,7 @@ import TypeChecker
 
 check :: String -> IO ()
 check s = do
-  case pProgram (myLexer s) of
+  case pProg (myLexer s) of
     Bad err  -> do
       putStrLn "SYNTAX ERROR"
       putStrLn err
