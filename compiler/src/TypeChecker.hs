@@ -30,12 +30,9 @@ type Context = Map Ident Type -- variables with their types
 -- type check program and return as type annotated
 typecheck :: Prog -> Err Prog
 typecheck (Program defs) = do
-  -- creates annotated tree, but dont use it until lab3 i guess?
-  --(Program annotatedTree) <- checkDefs emptyEnv (std ++ defs)
   e'   <- addFuns emptyEnv (std ++ defs)
   ds' <- checkFuns e' defs
   return $ Program $ removebuiltIns ds'
-  --return ()
 
 -- remove built in functions before returning annotated syntax tree
 removebuiltIns :: [TopDef] -> [TopDef]
@@ -52,25 +49,22 @@ removebuiltIns (def@(FnDef _ (Ident x) _ _) : defs)
   isbuiltIn "readDouble"  = True
   isbuiltIn _             = False
 
--- create new block for loops and such ------------------------------------------------------- not in use
+
+-- create new block for loops etc
 newBlock :: Env -> Env
 newBlock (sig, cons) = (sig, Map.empty : cons)
+
 
 -- create initial empty environment
 emptyEnv :: Env
 emptyEnv = (Map.empty, [])
+
 
 -- extract the type from an annotated expression
 unwrap :: Expr -> Err (Expr, Type)
 unwrap (ETyped e t) = return (ETyped e t, t)
 unwrap _            = Bad "can only unwrap annotated expressions"
 
--- check if functions are type correct
---checkDefs :: Env -> [TopDef] -> Err Prog
---checkDefs e ds = do
---  e'   <- addFuns e ds
---  defs <- checkFuns e' ds
---  return (PDefs defs)
 
 -- type check function and return it with type annotated statements
 checkFuns :: Env -> [TopDef] -> Err [TopDef]
@@ -80,7 +74,6 @@ checkFuns env (d : ds) = do
   ds'     <- checkFuns env ds
   return (d' : ds')
 
---checkFun :: Env -> TopDef -> Err (Env, TopDef)
 
 -- return type of var if exists
 lookupVar :: Env -> Ident -> Err Type
@@ -92,6 +85,7 @@ lookupVar (sig, c : cons) id = do
       lookupVar (sig, cons) id
     else do
       return (fromJust present)
+
 
 -- return head type of function
 lookupFun :: Env -> Ident -> Err ([Type], Type) -------------------------------------------------- use internal type instead?
@@ -125,8 +119,8 @@ addFun (sig, cons) id (args, result) = do
 -- type check and annotate expression
 inferExp :: Env -> Expr -> Err Expr
 inferExp env x = case x of
-  --EBool   b              -> return (ETyped x Bool)
   ELitTrue  -> return (ETyped x Bool)
+
   ELitFalse -> return (ETyped x Bool)
 
   ELitInt n -> return (ETyped x Int)
@@ -134,8 +128,6 @@ inferExp env x = case x of
   ELitDoub n -> return (ETyped x Doub)
 
   EString s -> return (ETyped x String)
-
-  --(ETyped e Doub) -> return x ------------------------ remove?
 
   EVar id -> do
     ETyped x <$> lookupVar env id
@@ -256,7 +248,7 @@ checkDecls e t [] = return (e, [])
 
 -- type check and annotate statement
 -- Bool argument: main, is this the main function?
--- Bool return value: guarantees return, does this statement guarantee a return statement?
+-- Bool return value: does this statement guarantee a return statement?
 checkStm :: Env -> Type -> Stmt -> Bool -> Err (Env, Stmt, Bool)
 
 checkStm env val x main = case x of
@@ -286,7 +278,7 @@ checkStm env val x main = case x of
 
   While exp stm -> do
     checkExp env Bool exp
-    let env' = (fst env, Map.empty : snd env) ------------------------------------------ empty env
+    let env' = newBlock env
     (_, stm', stm_returns) <- checkStm env' val stm main
     exp'      <- inferExp env exp
     if (exp == ELitTrue)
@@ -295,13 +287,13 @@ checkStm env val x main = case x of
     
 
   BStmt (Block ss) -> do
-    let env' = (fst env, Map.empty : snd env)
+    let env' = newBlock env
     (_, ss', returns) <- checkStms env' val ss main
     return (env, BStmt (Block ss'), returns)
 
   Cond exp s -> do
     checkExp env Bool exp
-    let env' = (fst env, Map.empty : snd env) -----------------------newblock
+    let env' = newBlock env
     (_, s', s_returns) <- checkStm env' val s main
     exp'    <- inferExp env exp
     if (exp == ELitTrue)
@@ -310,7 +302,7 @@ checkStm env val x main = case x of
 
   CondElse exp s1 s2 -> do
     checkExp env Bool exp
-    let env' = (fst env, Map.empty : snd env)
+    let env' = newBlock env
     (_, s1', s1_returns) <- checkStm env' val s1 main
     (_, s2', s2_returns) <- checkStm env' val s2 main
     exp'     <- inferExp env exp
@@ -322,7 +314,7 @@ checkStm env val x main = case x of
   Ass id exp -> do
     typ <- lookupVar env id
     (e, typ2) <- inferExp env exp >>= unwrap
-    if (typ == typ2) -------------------------------------------------- use checkexp?
+    if (typ == typ2)
       then return (env , Ass id e, False )
       else Bad ( "variable " ++ show id ++ " has type " ++ printTree typ ++ ", cant assign expression of different type " ++ printTree typ2 )
     
@@ -338,10 +330,6 @@ checkStm env val x main = case x of
     if (typ == Int || typ == Doub)
       then return (env, x, False)
       else  Bad ( "type " ++ printTree typ ++ "of variable " ++ show id ++ " cant be decremented" )
-
-  SExp exp -> do
-    exp' <- inferExp env exp
-    return (env, SExp exp', False)
   
   Empty -> return (env, x, False)
 
@@ -352,15 +340,16 @@ checkStm env val x main = case x of
 -- Bool main: true if we are checking statements for the main function
 -- Bool returns: do these statements guarantee a return statement?
 checkStms :: Env -> Type -> [Stmt] -> Bool -> Err (Env, [Stmt], Bool)
+-- base case void function, dont care about return statement existence
 checkStms e Void [] False = return (e, [], True)
+-- base case
 checkStms e _ [] main = return (e, [], False)
+-- general case void function, dont care about return statement existance
 checkStms e Void (s:ss) False = do
   (e', s', _) <- checkStm e Void s False
   (e'', ss', _) <- checkStms e' Void ss False
   return (e'', s':ss', True)
-checkStms env typ (s : []) main = do
-  (env', s', returns) <- checkStm env typ s main
-  return (env', s':[], returns)
+
 checkStms env typ (s : ss) main = do
   (env' , s', s_returns) <- checkStm env typ s main
   (env'', ss', ss_returns) <- checkStms env' typ ss main

@@ -37,9 +37,5 @@ check s = do
 
 main :: IO ExitCode
 main = do
-  args <- getArgs
-  case args of
-    [file] -> readFile file >>= check
-    _      -> do
-      putStrLn "Usage: jlc <SourceFile>"
-      exitFailure
+  program <- hGetContents stdin
+  check program
