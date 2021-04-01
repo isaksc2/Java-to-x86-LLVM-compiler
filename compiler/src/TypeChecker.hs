@@ -335,6 +335,15 @@ checkStm env val x = case x of
 -- type check and annotate statements
 checkStms :: Env -> Type -> [Stmt] -> Err (Env, [Stmt])
 checkStms e   _   []       = return (e, [])
+checkStms e Void (s:[]) = do
+  (e', s') <- checkStm e Void s
+  return (e', s':[])
+checkStms e t ((Ret exp):[]) = do
+  (e', s') <- checkStm e Void (Ret exp)
+  return (e', s':[])
+checkStms e t (s:[]) = do
+  Bad ( "last statement has to be return for type " ++ printTree t )
+
 checkStms env typ (s : ss) = do
   (env' , s' ) <- checkStm env typ s
   (env'', ss') <- checkStms env' typ ss

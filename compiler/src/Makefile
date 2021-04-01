@@ -4,7 +4,7 @@
 ###########################################################################
 
 # Files of solution.  Add more files as needed.  'lab2.hs'  has to be first!
-files=lab1.hs Javalette.cf Makefile TypeChecker.hs 
+files=jlc.hs Javalette.cf Makefile TypeChecker.hs 
 
 ###########################################################################
 
@@ -14,8 +14,8 @@ files=lab1.hs Javalette.cf Makefile TypeChecker.hs
 # 'lab2' is default goal and needs to remain first goal in this file!
 # The extra dependency Javalette/Test ensures that the parser is built from Javalette.cf
 
-lab2 : $(files) Javalette/Test
-	ghc --make lab1.hs -o lab1
+jlc : $(files) Javalette/Test
+	ghc --make jlc.hs -o jlc
 
 # Rules to build the parser:
 
@@ -51,5 +51,6 @@ distclean : clean
 	-rm -f Javalette/Doc.* Javalette/Lex.* Javalette/Par.* Javalette/Layout.* Javalette/Skel.* Javalette/Print.* Javalette/Test.* Javalette/Abs.* Javalette/Test Javalette/ErrM.* Javalette/SharedString.* Javalette/ComposOp.* Javalette/Javalette.dtd Javalette/XML.* Javalette/*.bak
 	-rmdir -p Javalette/
 	-rm -f lab1.tar.gz lab2
+	-rm jlc.exe
 
 # EOF

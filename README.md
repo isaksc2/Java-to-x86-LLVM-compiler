@@ -28,7 +28,7 @@ tar -czvf partA-1.tar.gz -C ../compiler .
 
 python3 testing.py partA-1.tar.gz
 
-cd ../compiler; make vclean; cd ../test
+cd ../compiler; make distclean; make; cd ../test
 
 javalette desc
 int main() must exist
