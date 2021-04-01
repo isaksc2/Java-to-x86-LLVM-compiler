@@ -12,16 +12,16 @@ files=a.txt
 .PHONY : all clean distclean
 
 a.txt : 
-	cd src; make
+	cd src && make && mv jlc.exe ..
 
 all :
-	cd src; make; mv jlc.exe ..
+	cd src && make && mv jlc.exe ..
 
 clean :
-	cd src; make clean
+	cd src && make clean
 
 distclean : clean
-	cd src; make distclean
 	-rm jlc.exe
+	cd src && make distclean
 
 # EOF

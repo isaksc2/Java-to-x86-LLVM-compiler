@@ -255,10 +255,11 @@ checkDecls e t [] = return (e, [])
 
 
 -- type check and annotate statement
--- Bool guarantees return: does this statement guarantee a return statement?
-checkStm :: Env -> Type -> Stmt -> Err (Env, Stmt, Bool)
+-- Bool argument: main, is this the main function?
+-- Bool return value: guarantees return, does this statement guarantee a return statement?
+checkStm :: Env -> Type -> Stmt -> Bool -> Err (Env, Stmt, Bool)
 
-checkStm env val x = case x of
+checkStm env val x main = case x of
   SExp exp -> do
     exp' <- inferExp env exp
     return (env, SExp exp', False)
@@ -271,9 +272,12 @@ checkStm env val x = case x of
         return (env', Decl typ items', False)
 
   Ret exp -> do
-    checkExp env val exp
-    exp' <- inferExp env exp
-    return (env, Ret exp', True)
+    if (main && exp /= (ELitInt 0))
+      then Bad "main has a return statement which doesnt return the integer literal 0"
+      else do
+        checkExp env val exp
+        exp' <- inferExp env exp
+        return (env, Ret exp', True)
 
   VRet -> do
     if (val == Void)
@@ -283,7 +287,7 @@ checkStm env val x = case x of
   While exp stm -> do
     checkExp env Bool exp
     let env' = (fst env, Map.empty : snd env) ------------------------------------------ empty env
-    (_, stm', stm_returns) <- checkStm env' val stm
+    (_, stm', stm_returns) <- checkStm env' val stm main
     exp'      <- inferExp env exp
     if (exp == ELitTrue)
       then return (env, While exp' stm', stm_returns)
@@ -292,13 +296,13 @@ checkStm env val x = case x of
 
   BStmt (Block ss) -> do
     let env' = (fst env, Map.empty : snd env)
-    (_, ss', returns) <- checkStms env' val ss
+    (_, ss', returns) <- checkStms env' val ss main
     return (env, BStmt (Block ss'), returns)
 
   Cond exp s -> do
     checkExp env Bool exp
     let env' = (fst env, Map.empty : snd env) -----------------------newblock
-    (_, s', s_returns) <- checkStm env' val s
+    (_, s', s_returns) <- checkStm env' val s main
     exp'    <- inferExp env exp
     if (exp == ELitTrue)
       then return (env, Cond exp' s', s_returns) 
@@ -307,8 +311,8 @@ checkStm env val x = case x of
   CondElse exp s1 s2 -> do
     checkExp env Bool exp
     let env' = (fst env, Map.empty : snd env)
-    (_, s1', s1_returns) <- checkStm env' val s1
-    (_, s2', s2_returns) <- checkStm env' val s2
+    (_, s1', s1_returns) <- checkStm env' val s1 main
+    (_, s2', s2_returns) <- checkStm env' val s2 main
     exp'     <- inferExp env exp
     case exp of
       ELitTrue -> return (env, CondElse exp' s1' s2', s1_returns)
@@ -345,20 +349,21 @@ checkStm env val x = case x of
 
 
 -- type check and annotate statements
--- Bool returns: do these statements fuarantee a return?
-checkStms :: Env -> Type -> [Stmt] -> Err (Env, [Stmt], Bool)
-checkStms e Void [] = return (e, [], True)
-checkStms e _ [] = return (e, [], False)
-checkStms e Void (s:ss) = do
-  (e', s', _) <- checkStm e Void s
-  (e'', ss', _) <- checkStms e' Void ss
+-- Bool main: true if we are checking statements for the main function
+-- Bool returns: do these statements guarantee a return statement?
+checkStms :: Env -> Type -> [Stmt] -> Bool -> Err (Env, [Stmt], Bool)
+checkStms e Void [] False = return (e, [], True)
+checkStms e _ [] main = return (e, [], False)
+checkStms e Void (s:ss) False = do
+  (e', s', _) <- checkStm e Void s False
+  (e'', ss', _) <- checkStms e' Void ss False
   return (e'', s':ss', True)
-checkStms env typ (s : []) = do
-  (env', s', returns) <- checkStm env typ s
+checkStms env typ (s : []) main = do
+  (env', s', returns) <- checkStm env typ s main
   return (env', s':[], returns)
-checkStms env typ (s : ss) = do
-  (env' , s', s_returns) <- checkStm env typ s
-  (env'', ss', ss_returns) <- checkStms env' typ ss
+checkStms env typ (s : ss) main = do
+  (env' , s', s_returns) <- checkStm env typ s main
+  (env'', ss', ss_returns) <- checkStms env' typ ss main
   return (env'', s' : ss', s_returns || ss_returns)
 
 
@@ -366,7 +371,7 @@ checkStms env typ (s : ss) = do
 checkFun :: Env -> TopDef -> Err (Env, TopDef)
 checkFun env (FnDef result id args (Block ss)) = do
   env'     <- addArgs env args
-  (_, ss', returns) <- checkStms env' result ss
+  (_, ss', returns) <- checkStms env' result ss (id == (Ident "main"))
   if (returns)
     then return (env, FnDef result id args (Block ss'))
     else Bad ("the function " ++ show id ++ " doesnt guarantee a return statement")
