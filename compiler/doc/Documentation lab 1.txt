@@ -1,0 +1,33 @@
+Explanation of compiler files:
+    /Makefile is a wrapper makefile that calls the actual makefile /src/Makefile. The makefiles have the targets all, clean and distclean.
+
+    Javalette.cf is the BNF file. it is identical to the original file apart from an internal string literal for giving inputs to printString(),
+    as well as an interal Typed expression for creating type annotated syntax trees. 
+    Note that The internal function type is not used as of now, that will probably change later though.
+    The BNF has 1 reduce/ shift conflict taht comes from the "if exp stmt1 else stmt2" and "if expr stmt" statements.
+    This conflict appears because these two statements look identical up until the first statement, 
+    so after shifting all the first "tokens" including the first statement, 
+    you cant tell if you should reduce those first tokens to an "if expr stmt" statement or if you should shift another token and try to get an if-else statement.
+
+    /src/jlc.hs is a wrapper that reads the input program string, sends it to the type checker and
+     returns an exit code and "OK" if the program is syntax correct and type correct, otherwise "ERROR".
+
+    /src/Typechecker.hs takes a syntax tree, type checks it and type annotates it.
+        The file is divided into 5 parts:
+            imports, constants, type declarations and the "main" function
+            miscellaneous helper functions
+            lookup functions
+            functions for updating the environment
+            type checker functions for functions, statements and expressions
+
+        Some notable design decisions:
+            The environment is passed around manually with functions, and it contains the variables and functions with their types.
+            I used this approach since it let me copy most of the code from the PLT course, so I will use the state monad in the later labs.
+
+            I pass a "main"-Bool in the check-statement functions in order to make sure the main function can only return 0.
+
+            check-statement functions return a "returns"-Bool to keep track of whether a statement guarantees a return statement.
+
+
+
+    

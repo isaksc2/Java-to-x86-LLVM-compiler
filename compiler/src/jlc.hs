@@ -14,20 +14,17 @@ import Javalette.ErrM           (pattern Ok, pattern Bad)
 import TypeChecker
 --import Interpreter
 
--- | Parse, type check, and interpret a program given by the @String@.
-
+-- | Parse and type check a program given by the @String@.
 check :: String -> IO ExitCode
 check s = do
   case pProg (myLexer s) of
     Bad err  -> do
-      hPutStrLn stderr "ERROR"
-      --putStrLn err
+      hPutStrLn stderr "ERROR" -- syntax error
       exitFailure
     Ok  tree -> do
       case typecheck tree of
         Bad err -> do
-          hPutStrLn stderr "ERROR"
-          --putStrLn err
+          hPutStrLn stderr "ERROR" -- type error 
           exitFailure
         Ok _ -> do
           hPutStrLn stderr "OK"
