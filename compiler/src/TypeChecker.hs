@@ -253,108 +253,160 @@ checkDecls e t [] = return (e, [])
 
 
 -- type check and annotate statement
-checkStm :: Env -> Type -> Stmt -> Err (Env, Stmt)
-checkStm env val x = case x of
+-- Bool: flag for indicating that this is the last statement (void functions dont need to have a last return statememt)
+checkStm :: Env -> Type -> Stmt -> Bool -> Err (Env, Stmt, Bool)
+-- valid last statements
+checkStm env val (CondElse exp s1 s2) True = do 
+  checkExp env Bool exp
+  let env' = (fst env, Map.empty : snd env)
+  (_, s1') <- checkStm env' val s1 True
+  (_, s2') <- checkStm env' val s2 True
+  exp'     <- inferExp env exp
+  return (env, CondElse exp' s1' s2')
+checkStm env val (Ret exp) True = do
+  checkExp env val exp
+  exp' <- inferExp env exp
+  return (env, Ret exp')
+checkStm env val (VRet) True = do
+  if (val == Void)
+    then return (env, VRet)
+    else Bad ( "returns void but expected " ++ printTree val )
+--checkStm env val (Empty) True = return (env, Empty)
+checkStm _ _ _ True = Bad "the last statement has to be a return statement"
+
+checkStm env val x last = case x of
   SExp exp -> do
     exp' <- inferExp env exp
-    return (env, SExp exp')
+    return (env, SExp exp', False)
 
   Decl typ items -> do
     if (typ == String)
       then Bad "variable cant have type string"
       else do
         (env', items') <- checkDecls env typ items
-        return (env', Decl typ items')
+        return (env', Decl typ items', False)
 
   Ret exp -> do
     checkExp env val exp
     exp' <- inferExp env exp
-    return (env, Ret exp')
+    return (env, Ret exp', True)
 
   VRet -> do
     if (val == Void)
-      then return (env, VRet)
+      then return (env, VRet, True)
       else Bad ( "returns void but expected " ++ printTree val )
 
   While exp stm -> do
     checkExp env Bool exp
     let env' = (fst env, Map.empty : snd env) ------------------------------------------ empty env
-    (_, stm') <- checkStm env' val stm
+    (_, stm', stm_returns) <- checkStm env' val stm last
     exp'      <- inferExp env exp
-    return (env, While exp' stm')
+    if (exp == ELitTrue)
+      then let returns = stm_returns
+      else let returns = False
+    return (env, While exp' stm', returns)
 
   BStmt (Block ss) -> do
     let env' = (fst env, Map.empty : snd env)
-    (_, ss') <- checkStms env' val ss
-    return (env, BStmt (Block ss'))
+    (_, ss', returns) <- checkStms env' val ss last
+    return (env, BStmt (Block ss'), returns)
 
   Cond exp s -> do
     checkExp env Bool exp
     let env' = (fst env, Map.empty : snd env) -----------------------newblock
-    (_, s') <- checkStm env' val s
+    (_, s', s_returns) <- checkStm env' val s last
     exp'    <- inferExp env exp
-    return (env, Cond exp' s')
+    if (exp == ELitTrue)
+      then let returns = s_returns
+      else let returns = False 
+    return (env, Cond exp' s', returns)
 
   CondElse exp s1 s2 -> do
     checkExp env Bool exp
     let env' = (fst env, Map.empty : snd env)
-    (_, s1') <- checkStm env' val s1
-    (_, s2') <- checkStm env' val s2
+    (_, s1', s1_returns) <- checkStm env' val s1 last
+    (_, s2', s2_returns) <- checkStm env' val s2 last
     exp'     <- inferExp env exp
-    return (env, CondElse exp' s1' s2')
+    if (exp == ELitTrue)
+      then let returns = s1_returns
+      else let returns = False
+    if (exp == ELitFalse)
+      then let returns = s2_returns
+      else let returns = False  
+    return (env, CondElse exp' s1' s2', returns)
 
   Ass id exp -> do
     typ <- lookupVar env id
     (e, typ2) <- inferExp env exp >>= unwrap
     if (typ == typ2) -------------------------------------------------- use checkexp?
-      then return (env , Ass id e )
+      then return (env , Ass id e, False )
       else Bad ( "variable " ++ show id ++ " has type " ++ printTree typ ++ ", cant assign expression of different type " ++ printTree typ2 )
     
   Incr id -> do
     typ <- lookupVar env id
     if (typ == Int || typ == Doub)
-      then return (env, x)
+      then return (env, x, False)
       else
         Bad ( "type " ++ printTree typ ++ "of variable " ++ show id ++ " cant be incremented" )
 
   Decr id -> do
     typ <- lookupVar env id
     if (typ == Int || typ == Doub)
-      then return (env, x)
+      then return (env, x, False)
       else  Bad ( "type " ++ printTree typ ++ "of variable " ++ show id ++ " cant be decremented" )
 
   SExp exp -> do
     exp' <- inferExp env exp
-    return (env, SExp exp')
+    return (env, SExp exp', False)
   
-  Empty -> return (env, x)
+  Empty -> return (env, x, False)
 
 
 
 
 -- type check and annotate statements
-checkStms :: Env -> Type -> [Stmt] -> Err (Env, [Stmt])
-checkStms e   _   []       = return (e, [])
-checkStms e Void (s:[]) = do
-  (e', s') <- checkStm e Void s
+-- Bool last: the last statement in this block has to be a return statement
+-- Bool returns: do these statements fuarantee a return?
+checkStms :: Env -> Type -> [Stmt] -> Bool -> Err (Env, [Stmt], Bool)
+checkStms e _ [] _ = return (e, [])
+checkStms e Void (s:[]) _ = do
+  (e', s') <- checkStm e Void s False
   return (e', s':[])
-checkStms e t ((Ret exp):[]) = do
-  (e', s') <- checkStm e Void (Ret exp)
-  return (e', s':[])
-checkStms e t (s:[]) = do
-  Bad ( "last statement has to be return for type " ++ printTree t )
+-- if(true), we must have return statement if not void
+checkStms env t ((Cond ELitTrue s) :ss) True = do
+  (env', s') <- checkStm env typ s ?
+  (env'', ss') <- checkStms env' typ ss last -- the doesnt need to be another return statement
+  return (env'', s' : ss')
+  -- if(true) s1 else s2
+checkStms env t ((CondElse ELitTrue s1 s2) :ss) last = do
+  (env', s') <- checkStm env typ s True
+  (env'', ss') <- checkStms env' typ ss False -- the doesnt need to be another return statement
+  return (env'', s' : ss')
+
+
+--checkStms e t ((Ret exp):[]) True = do -------------------- return
+  --(e', s') <- checkStm e t (Ret exp) True
+  --return (e', s':[])
+--checkStms e t ((Condelse s1 exp s2):[]) True = do -------------------- return
+  --(e', s') <- checkStm e t (Condelse s1 exp s2) True
+  --return (e', s':[])
+--checkStms e t (s:[]) True = do
+  --Bad ( "last statement has to be return for function with return type " ++ printTree t )
+checkStms env typ (s : []) = do
+  (env', s', returns) <- checkStm env typ s
+  return (env', s':[], returns)
 
 checkStms env typ (s : ss) = do
-  (env' , s' ) <- checkStm env typ s
-  (env'', ss') <- checkStms env' typ ss
-  return (env'', s' : ss')
+  (env' , s', s_returns) <- checkStm env typ s
+  (env'', ss', ss_returns) <- checkStms env' typ ss
+  return (env'', s' : ss', s_returns || ss_returns)
 
 
 -- type check dunction and return it with a type annotated body
 checkFun :: Env -> TopDef -> Err (Env, TopDef)
 checkFun env (FnDef result id args (Block ss)) = do
   env'     <- addArgs env args
-  (_, ss') <- checkStms env' result ss
+  (_, ss') <- checkStms env' result ss True
   return (env, FnDef result id args (Block ss'))
 
 -- add the given functions to the environment
