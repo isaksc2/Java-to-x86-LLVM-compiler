@@ -26,9 +26,15 @@ cd c:;cd "\_it\git repos\TDA283\test"
 
 tar -czvf partA-1.tar.gz -C ../compiler .
 
-python3 testing.py partA-1.tar.gz
+clear; python3 testing.py partA-1.tar.gz
 
 cd ../compiler; make distclean; make; cd ../test
+
+---
+
+63 return 1;
+
+---
 
 javalette desc
 int main() must exist
