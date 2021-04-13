@@ -4,7 +4,7 @@
 ###########################################################################
 
 # Files of solution.  Add more files as needed.  'lab2.hs'  has to be first!
-files=jlc.hs Javalette.cf Makefile TypeChecker.hs 
+files=jlc.hs Javalette.cf Makefile TypeChecker.hs llvmBackend.hs
 
 ###########################################################################
 

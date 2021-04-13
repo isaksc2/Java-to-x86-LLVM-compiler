@@ -1,5 +1,11 @@
 # TDA283
 
+-- llvm
+
+@puts = print?
+
+no global var in javalette but u will need global vars fro string lits
+
 compiler
 
 how to run
@@ -29,6 +35,8 @@ tar -czvf partA-1.tar.gz -C ../compiler .
 clear; python3 testing.py partA-1.tar.gz
 
 cd ../compiler; make distclean; make; cd ../test
+
+AjV>Z7DLF=
 
 ---
 
