@@ -273,7 +273,7 @@ instance ToJVM Code where
     Comment s                 -> ";; " ++ s
 
 compileDef :: Sig -> TopDef -> [String]
-compileDef sig0 def@(FnDef t f args ss) = concat
+compileDef sig0 def@(FnDef t f args (Block ss)) = concat
   [ ["", ".method public static " ++ toJVM (FunHead f $ funType def)]
   , [ ".limit locals " ++ show (limitLocals st)
     , ".limit stack " ++ show (limitStack st)
@@ -286,7 +286,7 @@ compileDef sig0 def@(FnDef t f args ss) = concat
 compileFun :: Type -> [Arg] -> [Stmt] -> Compile ()
 compileFun _ args ss = do
   mapM_ (\(Argument t' x) -> newVar x t') args
-  mapM_ compileStm                     ss
+  mapM_ compileStm ss
   emit $ Return Void
 
 
@@ -304,6 +304,17 @@ comment = emit . Comment
 blank :: Compile ()
 blank = comment ""
 
+compileDecl :: Type -> Item -> Compile ()
+compileDecl t (Init id (ETyped e _)) = do
+  newVar id t
+  (a, _) <- lookupVar id
+  compileExp (ETyped e t)
+  emit $ Store t a
+compileDecls t (NoInit id) = do
+  newVar id t
+  emit $ Store t 1
+  ----------------------------------- do some register bs instead of store
+
 compileStm :: Stmt -> Compile ()
 compileStm s0 = do
   let top = stmTop s0
@@ -315,20 +326,11 @@ compileStm s0 = do
       compileExp et
       emit $ Return t
 
-    Init t x (ETyped e _) -> do
-         --error $ printTree m
-      newVar x t
-      (a, _) <- lookupVar x
-      compileExp (ETyped e t)
-      emit $ Store t a
+    Decl t ds -> do
+      mapM_ (compileDecl t) ds
     SExp e@(ETyped _ t) -> do
       compileExp e
       emit $ Pop t
-    Decl t ids -> mapM_ (declVar t) ids
-     where
-      declVar :: Type -> Ident -> Compile ()
-      declVar t' i = do
-        newVar i t'
     While e s -> do
       l  <- newLabel
       l2 <- newLabel
@@ -338,7 +340,7 @@ compileStm s0 = do
 
       emit $ Goto l
       emit $ Label l2
-    BStmt ss -> do
+    BStmt (Block ss) -> do
       inNewBlock $ compileStms ss
      where
       compileStms :: [Stmt] -> Compile ()
@@ -355,6 +357,11 @@ compileStm s0 = do
       emit $ Label l1
       inNewBlock $ compileStm s2
       emit $ Label l2
+    Ass x e -> do
+      compileExp e
+      (a, t) <- lookupVar x
+      emit $ Store t a
+      emit $ Load t a
     s -> error $ "not implemented compileStm " ++ printTree s
 
 boolLitToBool :: Expr -> Bool
@@ -465,12 +472,6 @@ compileExp  = \case
     emit $ Label t
     emit $ IConst 1
     emit $ Label end
-
-  Ass x e -> do
-    compileExp e
-    (a, t) <- lookupVar x
-    emit $ Store t a
-    emit $ Load t a
 
 
   ETyped e _ -> compileExp e

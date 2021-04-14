@@ -10,6 +10,7 @@ import System.IO.Error    (isUserError, ioeGetErrorString)
 
 import Javalette.Par            (pProg, myLexer)
 import Javalette.ErrM           (pattern Ok, pattern Bad)
+import Javalette.Abs
 
 import TypeChecker
 import LlvmBackend
@@ -19,7 +20,7 @@ import LlvmBackend
 llvm :: Prog -> IO ()
 llvm p = do
   let code = compile "placeholder" p
-  writefile "placeholder.ll" code
+  writeFile "placeholder.ll" code
 
 -- | Parse and type check a program given by the @String@.
 check :: String -> IO ExitCode
