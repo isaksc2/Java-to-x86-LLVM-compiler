@@ -45,9 +45,11 @@ compile name (Program defs) =
     (f, ) $ FunHead (Ident $ name ++ "/" ++ x) $ funType def
 
 
--- | Indent non-empty lines.
+-- | Indent non-empty, non label lines.
 indent :: String -> String
-indent s = if null s then s else "\t" ++ s
+indent s | null s = s
+indent s | last s == ":" = s
+indent s = "\t" ++ s
 
 type Sig = Map Ident FunHead
 type Cxt = [Block]
@@ -74,6 +76,8 @@ initSt s = St { sig          = s
               }
 
 type Addr = Int
+
+data LLVMType = Lit Type | Ptr Type
 
 -- convert function to a slightly different type.
 funType :: TopDef -> FunType
@@ -123,17 +127,24 @@ class Size a where
 class ToJVM a where
     toJVM :: a -> String
 
+instance ToJVM LLVMType where
+  toJVM = \case
+    Ptr ptr -> ToJVM ptr ++ "*" 
+    Lit lit -> ToJVM lit
+
 instance ToJVM Type where
   toJVM t = case t of
-    Int    -> "I"
-    Void   -> "V"
-    Bool   -> "Z"
-    Doub -> "D"
+    Int    -> "i32"
+    Void   -> "void"
+    Bool   -> "i1"
+    Doub   -> "double"
+    String -> "i8*"
 
 instance ToJVM MulOp where
   toJVM op = case op of
     Times -> "mul"
     Div   -> "div"
+    Mod   -> "srem"
 
 instance ToJVM AddOp where
   toJVM op = case op of
@@ -143,12 +154,12 @@ instance ToJVM AddOp where
 
 instance ToJVM RelOp where
   toJVM op = case op of
-    LTH   -> "lt"
-    GTH   -> "gt"
-    LE -> "le"
-    GE -> "ge"
+    LTH   -> "slt"
+    GTH   -> "sgt"
+    LE    -> "sle"
+    GE    -> "sge"
     EQU   -> "eq"
-    NE  -> "ne"
+    NE    -> "ne"
 
 builtin :: [(Ident, FunHead)]
 builtin =
@@ -159,26 +170,34 @@ builtin =
   , (Ident "readDouble",   FunHead (Ident "Runtime/doubleInt") $ FunType Doub [])
   ]
 
+-- more like value or register
+data Value = LitInt Integer | LitDoub Double | Reg String
 
 data Code
-  = Store Type Addr
-  | Load Type Addr
-  | IConst Integer
-  | DConst Double
-  | Dup Type
-  | Pop Type
-  | Return Type
-  | Call FunHead
+  = Store LLVMType Value LLVMType Value
+  | Load Type Type Value
+  -- | IConst Integer
+  -- | DConst Double
+  -- | Dup Type
+  -- | Pop Type
+  | Return LLVMType Value
+  | ReturnVoid
+  | Call LLVMType Ident [(LLVMType, Value)]
 
   | Label Label
-  | Goto Label
-  | If RelOp Label
-  | IfCmp Type RelOp Label
-  | DCmp
-  | Inc Type Addr Int
-  | Add Type AddOp
-  | Mul Type MulOp
-  | I2D
+  -- | Goto Label
+  -- | If RelOp Label
+  -- | IfCmp Type RelOp Label
+  -- | DCmp
+  -- | Inc Type Addr Int
+  | Add AddOp LLVMType Value Value
+  | Mul MulOp LLVMType Value Value
+  -- | I2D
+  | Compare RelOp LLVMType Value Value
+  | Alloca Type
+  | Assign Value Code
+  | Branch Label
+  | BranchCond Value Label Label
   | Comment String
 
     deriving (Show)
@@ -207,20 +226,21 @@ flipCmp = \case
   LE -> GE
   GE -> LE
 
-instance ToJVM FunType where
-  toJVM (FunType t ts) = "(" ++ (toJVM =<< ts) ++ ")" ++ toJVM t
+--instance ToJVM FunType where
+  --toJVM (FunType t ts) = "(" ++ (toJVM =<< ts) ++ ")" ++ toJVM t
 
 instance ToJVM FunHead where
-  toJVM (FunHead (Ident f) t) = f ++ toJVM t
+  toJVM (FunHead (Ident f) (FunType t ts)) = "define " ++ ToJVM t ++ " @" ++ show f ++ "(" ++ (toJVM =<< ts) ++ ")"
 
 instance ToJVM Label where
-  toJVM (L l) = "L" ++ show l
+  toJVM (L l) = show l
 
 prefix :: Type -> String
-prefix Int    = "i"
-prefix Bool   = "i"
-prefix Doub = "d"
+prefix Int    = ""
+prefix Bool   = ""
+prefix Doub   = "f"
 prefix Void   = ""
+prefix String = ""
 
 sep :: Int -> Int -> String
 sep i n | i >= n    = "_"
@@ -233,63 +253,90 @@ isByte n | n < 256 || (-128) <= n && n < 128 = True
 impossible :: Code -> String
 impossible a = error $ "impossible code " ++ toJVM a
 
+instance ToJVM Value where
+  toJVM = \case
+    LitInt i -> show i
+    LitDoub d -> show d
+    Reg r -> "%" ++ r
+
+newtype Arguments = Args [(LLVMType, Value)]
+
+instance ToJVM Arguments where
+  toJVM [] = ""
+  toJVM [(t, v)] = ToJVM t ++ " " ++ ToJVM v
+  toJVM ((t, v):as) = ToJVM t ++ " " ++ ToJVM v ++ ", " ++ ToJVM as
+
 instance ToJVM Code where
   toJVM = \case
-    Store t n -> prefix t ++ "store" ++ sep 3 n ++ show n
-    Load  t n -> prefix t ++ "load" ++ sep 3 n ++ show n
-    Return t  -> prefix t ++ "return"
-    Call   f  -> "invokestatic " ++ toJVM f
-    DConst d  -> "ldc2_w " ++ show d
+    Store t1 from t2 to                   -> "store " ++ ToJVM t1 ++ ToJVM from " , " ++ ToJVM t2  ++ " " ++ ToJVM to
+    Load  t1 t2 reg                       -> "load " ++ toJVM t1 ++ " , " ++ toJVM t2 ++ " " ++ toJVM reg
+    Return t v                            ->  "ret " ++ ToJVM t ++ " " ++ ToJVM v
+    ReturnVoid                            -> "ret"
+    Call t (Ident f) args                 -> "call " ++ ToJVM t ++ " @" ++ show f ++ "(" ++ ToJVM args ")"
+    --DConst d  -> "ldc2_w " ++ show d
 
-    IConst i | i == -1          -> "iconst_m1"
-             | i >= 0 && i <= 5 -> "iconst_" ++ show i
-             | isByte i         -> "bipush " ++ show i
-             | otherwise        -> "ldc " ++ show i
+    --IConst i | i == -1          -> "iconst_m1"
+   --          | i >= 0 && i <= 5 -> "iconst_" ++ show i
+    --         | isByte i         -> "bipush " ++ show i
+     --        | otherwise        -> "ldc " ++ show i
 
-    Dup   Doub         -> "dup2"
-    Dup   _                   -> "dup"
-    Pop   Doub         -> "pop2"
-    Pop   _                   -> "pop"
+    --Dup   Doub         -> "dup2"
+    --Dup   _                   -> "dup"
+    --Pop   Doub         -> "pop2"
+    --Pop   _                   -> "pop"
 
-    Label l                   -> toJVM l ++ ":"
-    Goto  l                   -> "goto " ++ toJVM l
-    If op                   l -> "if" ++ toJVM op ++ " " ++ toJVM l
+    Label l                               -> toJVM l ++ ":"
+    --Goto  l                   -> "goto " ++ toJVM l
+    Compare op t v1 v2 | t == Lit Int     -> "icmp " ++ ToJVM op ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
+                       | t == Lit Doub    -> "fcmp " ++ ToJVM op ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
+    --If op                   l -> "if" ++ toJVM op ++ " " ++ toJVM l
 
-    c@(IfCmp Doub _ _) -> impossible c
-    c@(IfCmp Void   _ _) -> impossible c
+    --c@(IfCmp Doub _ _) -> impossible c
+    --c@(IfCmp Void   _ _) -> impossible c
 
-    IfCmp _ op l              -> "if_icmp" ++ toJVM op ++ " " ++ toJVM l
-    DCmp                      -> "dcmpg"
+    --IfCmp _ op l              -> "if_icmp" ++ toJVM op ++ " " ++ toJVM l
+    --DCmp                      -> "dcmpg"
 
-    Inc Int a k          -> "iinc " ++ show a ++ " " ++ show k
-    c@Inc{}                   -> impossible c
+     --Inc Int a k          -> "iinc " ++ show a ++ " " ++ show k
+    --c@Inc{}                   -> impossible c
 
-    Add t op                  -> prefix t ++ toJVM op
-    Mul t op                  -> prefix t ++ toJVM op
+    Add op t v1 v2 | t1 == Lit Int        ->        ToJVM op ++ " " ++ ToJVM t ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
+                   | t1 == Lit Doub       -> "f" ++ ToJVM op ++ " " ++ ToJVM t ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
+    Mul op t v1 v2 | t1 == Lit Int        ->        ToJVM op ++ " " ++ ToJVM t ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
+                   | t1 == Lit Doub       -> "f" ++ ToJVM op ++ " " ++ ToJVM t ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
+    
+    Alloca t                              -> "alloca " ++ ToJVM t
 
-    I2D                       -> "i2d"
+    Assign adr c                          -> ToJVM adr ++ " = " ++ ToJVM c 
 
-    Comment ""                -> ""
-    Comment s                 -> ";; " ++ s
+    Branch lb                             -> "br Label " ++ ToJVM lb
+    BranchCond c lb1 lb2                  -> "br i1 " ++ ToJVM c ++ " , Label " ++ ToJVM lb1 ++ " , Label " ++ ToJVM lb1
+ 
+    --I2D                       -> "i2d"
+
+    Comment ""                            -> ""
+    Comment s                             -> "; " ++ s
 
 compileDef :: Sig -> TopDef -> [String]
 compileDef sig0 def@(FnDef t f args (Block ss)) = concat
-  [ ["", ".method public static " ++ toJVM (FunHead f $ funType def)]
-  , [ ".limit locals " ++ show (limitLocals st)
-    , ".limit stack " ++ show (limitStack st)
-    ]
+  [ ["", toJVM (FunHead f $ funType def), " {"]
+  , ["", "entry:"]
+  --, [ ".limit locals " ++ show (limitLocals st)
+   -- , ".limit stack " ++ show (limitStack st)
+   -- ]
   , map (indent . toJVM) $ reverse (output st)
-  , ["", ".end method"]
+  , ["", " }"]
   ]
   where st = execState (compileFun t args ss) $ initSt sig0
 
+-- compile the given function
 compileFun :: Type -> [Arg] -> [Stmt] -> Compile ()
 compileFun _ args ss = do
   mapM_ (\(Argument t' x) -> newVar x t') args
   mapM_ compileStm ss
   emit $ Return Void
 
-
+-- creates a comment 
 stmTop :: Stmt -> String
 stmTop = \case
   (Ret e    ) -> "return " ++ printTree e  -- ?
@@ -298,12 +345,15 @@ stmTop = \case
   (BStmt _     ) -> ""
   s               -> printTree s
 
+-- string comment
 comment :: String -> Compile ()
 comment = emit . Comment
 
+-- blank line
 blank :: Compile ()
 blank = comment ""
 
+-- help function for compiling variable declaration
 compileDecl :: Type -> Item -> Compile ()
 compileDecl t (Init id (ETyped e _)) = do
   newVar id t
@@ -315,6 +365,7 @@ compileDecls t (NoInit id) = do
   emit $ Store t 1
   ----------------------------------- do some register bs instead of store
 
+-- compile statement
 compileStm :: Stmt -> Compile ()
 compileStm s0 = do
   let top = stmTop s0
@@ -325,6 +376,8 @@ compileStm s0 = do
     Ret et@(ETyped _ t) -> do
       compileExp et
       emit $ Return t
+    VRet -> do
+      emit $ Return Void ----------------------------------- rätt?
 
     Decl t ds -> do
       mapM_ (compileDecl t) ds
@@ -337,14 +390,13 @@ compileStm s0 = do
       emit $ Label l
       compileCond False l2 e
       inNewBlock $ compileStm s
-
       emit $ Goto l
       emit $ Label l2
     BStmt (Block ss) -> do
       inNewBlock $ compileStms ss
      where
       compileStms :: [Stmt] -> Compile ()
-      compileStms []        = return ()
+      compileStms [] = return ()
       compileStms (s : ss') = do
         compileStm s
         compileStms ss'
@@ -357,11 +409,26 @@ compileStm s0 = do
       emit $ Label l1
       inNewBlock $ compileStm s2
       emit $ Label l2
+    Cond e s -> do
+      l1 <- newLabel
+      compileCond False l1 e
+      inNewBlock $ compileStm s
+      emit $ Label l1
     Ass x e -> do
       compileExp e
       (a, t) <- lookupVar x
       emit $ Store t a
       emit $ Load t a
+    Empty -> return ()
+    Incr i -> do
+      (a, t) <- lookupVar i
+      emit $ Load t a
+      emit $ Inc t a 1
+    Decr i -> do
+      (a, t) <- lookupVar i
+      emit $ Load t a
+      emit $ Inc t a (-1)
+
     s -> error $ "not implemented compileStm " ++ printTree s
 
 boolLitToBool :: Expr -> Bool
@@ -410,12 +477,7 @@ compileExp  = \case
 
   ELitDoub d  -> emit $ DConst d
 
-  --EPost i op -> do
-    --(a, t) <- lookupVar i
-    --emit $ Load t a
-    --case op of
-      --OInc -> emit $ Inc t a 1
-      --ODec -> emit $ Inc t a (-1)
+  EString s -> emit $ DConst 2.0 ----------------------------- todo SConst
 
   --EPre op i -> do
     --(a, t) <- lookupVar i
@@ -473,6 +535,21 @@ compileExp  = \case
     emit $ IConst 1
     emit $ Label end
 
+  Neg (ETyped e t) -> do 
+    compileExp e
+    case t of
+      Int -> do
+        emit $ IConst (-1)
+      Doub -> do
+        emit $ DConst (-1)
+    emit $ Mul t Times
+
+  Not (ETyped e Bool) -> do
+    compileExp e
+    emit $ IConst (-1)
+    emit $ Add Int Plus
+    emit $ IConst (-1)
+    emit $ Mul Int Times
 
   ETyped e _ -> compileExp e
 

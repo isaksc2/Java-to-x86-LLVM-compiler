@@ -44,4 +44,5 @@ check s = do
 main :: IO ExitCode
 main = do
   program <- hGetContents stdin
-  check program
+  check "int main(){ foo(); return 0;} void foo() { printString(\"foo\"); return;}"
+  --check program
