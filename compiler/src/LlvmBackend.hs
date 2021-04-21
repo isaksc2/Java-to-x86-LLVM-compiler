@@ -53,7 +53,8 @@ indent s = "\t" ++ s
 
 type Sig = Map Ident FunHead
 type Cxt = [Block]
-type Block = [(Ident, Type)]
+type Block = [(Ident, LLVMType)]
+
 
 data St = St
   { sig          :: Sig
@@ -62,7 +63,9 @@ data St = St
   , currentStack :: Int
   , limitStack   :: Int
   , nextLabel    :: Label
+  , nextVar      :: Value
   , output       :: Output
+  , prevResult    :: [Value]
   }
 
 initSt :: Sig -> St
@@ -72,7 +75,9 @@ initSt s = St { sig          = s
               , currentStack = 0
               , limitStack   = 0
               , nextLabel    = L 0
+              , nextVar      = Reg 0
               , output       = []
+              , prevResult   = []
               }
 
 type Addr = Int
@@ -108,6 +113,11 @@ instance Size Type where
 
 instance Size Ident where
   size _ = 0
+
+-- update or add argument
+setPrevVal :: Value -> Bool -> Compile ()
+setPrevVal v False = modify $ \st@St { prevResult = v0:vs } -> st { prevResult = v : vs } ------------ reverse?
+setPrevVal v True  = modify $ \st@St { prevResult =    vs } -> st { prevResult = v : vs } ------------ reverse?
 
 instance (Size a, Size b) => Size (a,b) where
   size (x, y) = size x + size y
@@ -170,19 +180,23 @@ builtin =
   , (Ident "readDouble",   FunHead (Ident "Runtime/doubleInt") $ FunType Doub [])
   ]
 
+newtype Register = R {theRegister :: Int}
+  deriving (Eq, Enum, Show)
+
 -- more like value or register
-data Value = LitInt Integer | LitDoub Double | Reg String
+data Value = LitInt Integer | LitDoub Double | Reg Register
 
 data Code
-  = Store LLVMType Value LLVMType Value
-  | Load Type Type Value
+  = Store LLVMType Value LLVMType Register
+  | Load Register LLVMType LLVMType Register
   -- | IConst Integer
   -- | DConst Double
   -- | Dup Type
   -- | Pop Type
   | Return LLVMType Value
   | ReturnVoid
-  | Call LLVMType Ident [(LLVMType, Value)]
+  | Call Register LLVMType Ident Arguments
+  | CallVoid LLVMType Ident Arguments
 
   | Label Label
   -- | Goto Label
@@ -190,14 +204,14 @@ data Code
   -- | IfCmp Type RelOp Label
   -- | DCmp
   -- | Inc Type Addr Int
-  | Add AddOp LLVMType Value Value
-  | Mul MulOp LLVMType Value Value
+  | Add Register AddOp LLVMType Value Value
+  | Mul Register MulOp LLVMType Value Value
   -- | I2D
-  | Compare RelOp LLVMType Value Value
-  | Alloca Type
-  | Assign Value Code
+  | Compare Register RelOp LLVMType Value Value
+  | Alloca Register Type
+  -- | Assign Value Code
   | Branch Label
-  | BranchCond Value Label Label
+  | BranchCond Register Label Label
   | Comment String
 
     deriving (Show)
@@ -242,6 +256,7 @@ prefix Doub   = "f"
 prefix Void   = ""
 prefix String = ""
 
+{-
 sep :: Int -> Int -> String
 sep i n | i >= n    = "_"
         | otherwise = " "
@@ -249,6 +264,7 @@ sep i n | i >= n    = "_"
 isByte :: Integer -> Bool
 isByte n | n < 256 || (-128) <= n && n < 128 = True
          | otherwise                         = False
+-}
 
 impossible :: Code -> String
 impossible a = error $ "impossible code " ++ toJVM a
@@ -257,7 +273,10 @@ instance ToJVM Value where
   toJVM = \case
     LitInt i -> show i
     LitDoub d -> show d
-    Reg r -> "%" ++ r
+    Reg r -> ToJVM R
+    
+instance ToJVM Register where
+  toJVM (R r) = show r
 
 newtype Arguments = Args [(LLVMType, Value)]
 
@@ -268,11 +287,12 @@ instance ToJVM Arguments where
 
 instance ToJVM Code where
   toJVM = \case
-    Store t1 from t2 to                   -> "store " ++ ToJVM t1 ++ ToJVM from " , " ++ ToJVM t2  ++ " " ++ ToJVM to
-    Load  t1 t2 reg                       -> "load " ++ toJVM t1 ++ " , " ++ toJVM t2 ++ " " ++ toJVM reg
-    Return t v                            ->  "ret " ++ ToJVM t ++ " " ++ ToJVM v
-    ReturnVoid                            -> "ret"
-    Call t (Ident f) args                 -> "call " ++ ToJVM t ++ " @" ++ show f ++ "(" ++ ToJVM args ")"
+    Store t1 from t2 to                     -> "store " ++ ToJVM t1 ++ ToJVM from " , " ++ ToJVM t2  ++ " " ++ ToJVM to
+    Load adr t1 t2 reg                      -> ToJVM adr ++ " = load " ++ toJVM t1 ++ " , " ++ toJVM t2 ++ " " ++ toJVM reg
+    Return t v                              -> "ret " ++ ToJVM t ++ " " ++ ToJVM v
+    ReturnVoid                              -> "ret"
+    Call adr t (Ident f) args               -> ToJVM adr ++ " = call " ++ ToJVM t ++ " @" ++ show f ++ "(" ++ ToJVM args ")"
+    CallVoid t (Ident f) args               -> "call " ++ ToJVM t ++ " @" ++ show f ++ "(" ++ ToJVM args ")"
     --DConst d  -> "ldc2_w " ++ show d
 
     --IConst i | i == -1          -> "iconst_m1"
@@ -287,8 +307,8 @@ instance ToJVM Code where
 
     Label l                               -> toJVM l ++ ":"
     --Goto  l                   -> "goto " ++ toJVM l
-    Compare op t v1 v2 | t == Lit Int     -> "icmp " ++ ToJVM op ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
-                       | t == Lit Doub    -> "fcmp " ++ ToJVM op ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
+    Compare adr op t v1 v2 | t == Lit Int   -> ToJVM adr ++ " = icmp " ++ ToJVM op ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
+                           | t == Lit Doub  -> ToJVM adr ++ " = fcmp " ++ ToJVM op ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
     --If op                   l -> "if" ++ toJVM op ++ " " ++ toJVM l
 
     --c@(IfCmp Doub _ _) -> impossible c
@@ -300,22 +320,22 @@ instance ToJVM Code where
      --Inc Int a k          -> "iinc " ++ show a ++ " " ++ show k
     --c@Inc{}                   -> impossible c
 
-    Add op t v1 v2 | t1 == Lit Int        ->        ToJVM op ++ " " ++ ToJVM t ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
-                   | t1 == Lit Doub       -> "f" ++ ToJVM op ++ " " ++ ToJVM t ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
-    Mul op t v1 v2 | t1 == Lit Int        ->        ToJVM op ++ " " ++ ToJVM t ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
-                   | t1 == Lit Doub       -> "f" ++ ToJVM op ++ " " ++ ToJVM t ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
+    Add adr op t v1 v2 | t1 == Lit Int          -> ToJVM adr ++ " = "        ++ ToJVM op ++ " " ++ ToJVM t ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
+                       | t1 == Lit Doub         -> ToJVM adr ++ " = " ++ "f" ++ ToJVM op ++ " " ++ ToJVM t ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
+    Mul adr op t v1 v2 | t1 == Lit Int          -> ToJVM adr ++ " = "        ++ ToJVM op ++ " " ++ ToJVM t ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
+                       | t1 == Lit Doub         -> ToJVM adr ++ " = " ++ "f" ++ ToJVM op ++ " " ++ ToJVM t ++ " " ++ ToJVM v1 ++ ", " ++ ToJVM v2
     
-    Alloca t                              -> "alloca " ++ ToJVM t
+    Alloca adr t                                -> ToJVM adr ++ " = alloca " ++ ToJVM t
 
-    Assign adr c                          -> ToJVM adr ++ " = " ++ ToJVM c 
+    --Assign adr c                          -> ToJVM adr ++ " = " ++ ToJVM c 
 
-    Branch lb                             -> "br Label " ++ ToJVM lb
-    BranchCond c lb1 lb2                  -> "br i1 " ++ ToJVM c ++ " , Label " ++ ToJVM lb1 ++ " , Label " ++ ToJVM lb1
+    Branch lb                               -> "br Label " ++ ToJVM lb
+    BranchCond c lb1 lb2                    -> "br i1 " ++ ToJVM c ++ " , Label " ++ ToJVM lb1 ++ " , Label " ++ ToJVM lb1
  
     --I2D                       -> "i2d"
 
-    Comment ""                            -> ""
-    Comment s                             -> "; " ++ s
+    Comment ""                              -> ""
+    Comment s                               -> "; " ++ s
 
 compileDef :: Sig -> TopDef -> [String]
 compileDef sig0 def@(FnDef t f args (Block ss)) = concat
@@ -334,7 +354,7 @@ compileFun :: Type -> [Arg] -> [Stmt] -> Compile ()
 compileFun _ args ss = do
   mapM_ (\(Argument t' x) -> newVar x t') args
   mapM_ compileStm ss
-  emit $ Return Void
+  emit $ Return Void -----------------------------------------------------------------------
 
 -- creates a comment 
 stmTop :: Stmt -> String
@@ -353,17 +373,27 @@ comment = emit . Comment
 blank :: Compile ()
 blank = comment ""
 
+getPrevResult :: Compile Value
+getPrevResult = do
+  allArgs <- gets prevResult
+  take 1 allArgs
+
 -- help function for compiling variable declaration
 compileDecl :: Type -> Item -> Compile ()
 compileDecl t (Init id (ETyped e _)) = do
   newVar id t
   (a, _) <- lookupVar id
   compileExp (ETyped e t)
-  emit $ Store t a
+  p <- getPrevResult
+  r <- newRegister
+  emit $ Alloca r t
+  emit $ Store t p (Ptr t) r
+
+  --emit $ Store t a
 compileDecls t (NoInit id) = do
   newVar id t
-  emit $ Store t 1
-  ----------------------------------- do some register bs instead of store
+  r <- newRegister
+  emit $ Alloca r t
 
 -- compile statement
 compileStm :: Stmt -> Compile ()
@@ -373,25 +403,31 @@ compileStm s0 = do
     blank
     mapM_ comment $ lines top
   case s0 of
-    Ret et@(ETyped _ t) -> do
-      compileExp et
-      emit $ Return t
+    Ret e@(ETyped _ t) -> do
+      compileExp e
+      emit $ Return t getPrevResult
     VRet -> do
-      emit $ Return Void ----------------------------------- rätt?
+      emit $ ReturnVoid ----------------------------------- rätt?
 
     Decl t ds -> do
       mapM_ (compileDecl t) ds
     SExp e@(ETyped _ t) -> do
       compileExp e
-      emit $ Pop t
+      --emit $ Pop t
+      -- removeArgs 1? -------------------------- todo
     While e s -> do
-      l  <- newLabel
-      l2 <- newLabel
-      emit $ Label l
-      compileCond False l2 e
+      start <- newLabel
+      t     <- newLabel
+      f     <- newLabel
+      emit $ Label start
+      --compileCond False l2 e
+      compileExp e False -------------  todo true? idk
+      r <- getPrevResult
+      emit $ BranchCond r t f
+      emit $ Label t
       inNewBlock $ compileStm s
-      emit $ Goto l
-      emit $ Label l2
+      emit $ Goto start
+      emit $ Label f
     BStmt (Block ss) -> do
       inNewBlock $ compileStms ss
      where
@@ -400,34 +436,55 @@ compileStm s0 = do
       compileStms (s : ss') = do
         compileStm s
         compileStms ss'
+
     CondElse e s1 s2 -> do
-      l1 <- newLabel
-      l2 <- newLabel
-      compileCond False l1 e
+      t   <- newLabel
+      f   <- newLabel
+      end <- newLabel
+      compileExp e False
+      r <- getPrevResult
+      emit $ BranchCond r t f
+      emit $ Label t
       inNewBlock $ compileStm s1
-      emit $ Goto l2
-      emit $ Label l1
+      emit $ Branch end
+      emit $ Label f
       inNewBlock $ compileStm s2
-      emit $ Label l2
+      emit $ Label end
+
     Cond e s -> do
-      l1 <- newLabel
-      compileCond False l1 e
-      inNewBlock $ compileStm s
-      emit $ Label l1
+      t   <- newLabel
+      f   <- newLabel
+      compileExp e False
+      r <- getPrevResult
+      emit $ BranchCond r t f
+      emit $ Label t
+      inNewBlock $ compileStm s1
+      emit $ Label f
+
     Ass x e -> do
-      compileExp e
-      (a, t) <- lookupVar x
-      emit $ Store t a
-      emit $ Load t a
+      compileExp e False
+      (a, pt@(Ptr t)) <- lookupVar x
+      r <- getPrevResult
+      emit $ Store t r pt a
+
     Empty -> return ()
     Incr i -> do
-      (a, t) <- lookupVar i
-      emit $ Load t a
-      emit $ Inc t a 1
+      (adr, (Ptr t)) <- lookupVar i
+      adr' <- newRegister
+      if (t == Int)
+        then v = 1
+        else v = 1.0
+      emit $ Add adr' Plus t adr v
+      emit $ Store t adr' (Ptr t) adr
+
     Decr i -> do
-      (a, t) <- lookupVar i
-      emit $ Load t a
-      emit $ Inc t a (-1)
+      (adr, (Ptr t)) <- lookupVar i
+      adr' <- newRegister
+      if (t == Int)
+        then v = 1
+        else v = 1.0
+      emit $ Add adr' Minus t adr v
+      emit $ Store t adr' (Ptr t) adr
 
     s -> error $ "not implemented compileStm " ++ printTree s
 
@@ -435,6 +492,7 @@ boolLitToBool :: Expr -> Bool
 boolLitToBool ELitTrue = True
 boolLitToBool ELitFalse = False
 
+{-
 compileCond :: Bool -> Label -> Expr -> Compile ()
 compileCond cond l = \case
   b -> when (boolLitToBool b == cond) $ emit $ Goto l
@@ -449,35 +507,62 @@ compileCond cond l = \case
   e -> do
     compileExp e
     emit $ (if cond then IfNZ else IfZ) l
+-}
 
-compileExp :: Expr -> Compile ()
+-- remove arguments from argument stack
+removeArgs :: Integer -> Compile()
+removeArgs n -> do
+  modify $ \st@St { prevResult = vs } -> st { prevResult = drop n vs } ------------ reverse?
+
+--convert Type to LLVMType
+Type2LLVMType :: Type -> LLVMType
+Type2LLVMType t = Lit t
+
+-- compile expression
+-- Bool: this expr is an argument to a function
+compileExp :: Expr -> Bool -> Compile ()
 compileExp  = \case
   --ETyped e Doub -> error $ printTree e --compileExp e
-  ELitInt i                      -> emit $ IConst i
-
+  (ELitInt i) b -> setPrevVal (Lit i) b
+{-
   ETyped (ELitInt i) Doub -> do
     emit $ IConst i
     emit I2D
-
+    -}
+{-
   ETyped (ETyped e Int) Doub -> do
     compileExp (ETyped e Int)
     emit I2D
+    -}
 
-  EVar x -> do
+  (EVar x) b -> do
     (a, t) <- lookupVar x
-    emit $ Load t a
+    --emit $ Load t a
+    setPrevVal a b
 
-  EApp x@(Ident _) es -> do
-    mapM_ compileExp es
-    f <- gets ((fromMaybe (error "undefined") . Map.lookup x) . sig)
-    emit $ Call f
+  (EApp x@(Ident _) es) b -> do
+    mapM_ compileExp es True
+    (id (FunType t ts)) <- gets ((fromMaybe (error "undefined") . Map.lookup x) . sig)
+    let n_args = length ts
+    allArgs <- gets prevResults
+    let args = take n_args allArgs
+    let args' = zip ts args
+    if (t == Void)
+      then
+        emit $ CallVoid (Type2LLVMType t) id args'
+        removeArgs n_args
+      else do
+        r <- newRegister
+        emit $ Call r   (Type2LLVMType t) id args'
+        removeArgs n_args
+        setPrevVal r b
 
-  ELitTrue -> emit $ IConst 1
-  ELitFalse -> emit $ IConst 0
+  ELitTrue b -> setPrevVal (Lit 1) b
+  ELitFalse b -> setPrevVal (Lit 0) b
 
-  ELitDoub d  -> emit $ DConst d
+  (ELitDoub d) b  -> setPrevVal (Lit d) b
 
-  EString s -> emit $ DConst 2.0 ----------------------------- todo SConst
+  (EString s) b -> setPrevVal (Lit s) b
 
   --EPre op i -> do
     --(a, t) <- lookupVar i
@@ -486,75 +571,115 @@ compileExp  = \case
       --ODec -> emit $ Inc t a (-1)
     --emit $ Load t a
 
-  ETyped (EMul e1 op e2) t -> do
-    compileExp e1
-    compileExp e2
-    emit $ Mul t op
+  (ETyped (EMul e1 op e2) t) b -> do
+    compileExp e1 True
+    compileExp e2 True
+    r <- newRegister
+    allArgs <- gets prevResults
+    let args = take 2 allArgs
+    emit $ Mul r op (Type2LLVMType t) args[0] args[1]
+    removeArgs 2
+    setPrevVal r b
 
-  ETyped (EAdd e1 op e2) t -> do
-    compileExp e1
-    compileExp e2
-    emit $ Add t op
+  (ETyped (EAdd e1 op e2) t) b -> do
+    compileExp e1 True
+    compileExp e2 True
+    r <- newRegister
+    allArgs <- gets prevResults
+    let args = take 2 allArgs
+    emit $ Add r op (Type2LLVMType t) args[0] args[1]
+    removeArgs 2
+    setPrevVal r b
 
-  ETyped (ERel e1@(ETyped _ t1) op e2) _ -> do
-    case t1 of
-      Doub -> do
-        compileExp e1
-        compileExp e2
-      _ -> do
-        compileExp e1
-        emit I2D
-        compileExp e2
-        emit I2D
-    emit DCmp
-    dCond op
+  (ETyped (ERel e1@(ETyped _ t1) op e2) _) b -> do
+    compileExp e1 True
+    compileExp e2 True
+    r <- newRegister
+    allArgs <- gets prevResults
+    let args = take 2 allArgs
+    emit $ Compare r op (Type2LLVMType t) args[0] args[1]
+    removeArgs 2
+    setPrevVal r b
+    -- br i1 %t2, label %lab2, label %lab1
 
   EAnd e1 e2 -> do
-    f   <- newLabel
-    end <- newLabel
+    t  <- newLabel
+    t2 <- newLabel
+    f  <- newLabel
 
-    compileCond False f e1
+    -- e1 true?
+    compileExp e1 True
+    allArgs <- gets prevResults
+    let e1_result = take 1 allArgs
+    emit $ BranchCond e1_result t f 
 
-    compileCond False f e2
-    emit $ IConst 1
-    emit $ Goto end
+    -- e2 true?
+    emit $ Label t 
+    compileExp e2 False -- ok to overwrite e1_result
+    allArgs <- gets prevResults
+    let e2_result = take 1 allArgs
+    emit $ BranchCond e2_result t2 f 
+
+    emit $ Label t2
+    removeArgs 1
+    setPrevVal (Lit true) b
     emit $ Label f
-    emit $ IConst 0
-    emit $ Label end
+    removeArgs 1
+    setPrevVal (Lit false) b
 
   EOr e1 e2 -> do
-    t   <- newLabel
-    end <- newLabel
+    t  <- newLabel
+    f  <- newLabel
+    f2 <- newLabel
 
-    compileCond True t e1
+    -- e1 true?
+    compileExp e1 True
+    allArgs <- gets prevResults
+    let e1_result = take 1 allArgs
+    emit $ BranchCond e1_result t f 
 
-    compileCond True t e2
-    emit $ IConst 0
-    emit $ Goto end
+    -- e2 true?
+    emit $ Label f 
+    compileExp e2 False -- ok to overwrite e1_result
+    allArgs <- gets prevResults
+    let e2_result = take 1 allArgs
+    emit $ BranchCond e2_result t f2 
+
+    emit $ Label f2
+    removeArgs 1
+    setPrevVal (Lit false) b
     emit $ Label t
-    emit $ IConst 1
-    emit $ Label end
+    removeArgs 1
+    setPrevVal (Lit true) b
 
-  Neg (ETyped e t) -> do 
-    compileExp e
-    case t of
-      Int -> do
-        emit $ IConst (-1)
-      Doub -> do
-        emit $ DConst (-1)
-    emit $ Mul t Times
+  Neg (ETyped e t) -> do
+    if (t == Int)
+      then 
+        e2 = (ELitInt -1)
+      else
+        e2 = (ELitDoub -1.0)
+    compileExp (ETyped (EMul e Times e2 ) t) b
 
   Not (ETyped e Bool) -> do
-    compileExp e
-    emit $ IConst (-1)
-    emit $ Add Int Plus
-    emit $ IConst (-1)
-    emit $ Mul Int Times
+    t <- newLabel
+    f <- newLabel
+    compileExp e True
+    allArgs <- gets prevResults
+    let e_result = take 1 allArgs
+    emit $ BranchCond e_result t f
+
+    emit $ Label t
+    removeArgs 1
+    setPrevVal (Lit false) b
+
+    emit $ Label f
+    removeArgs 1
+    setPrevVal (Lit true) b --- todo, save to adress?
 
   ETyped e _ -> compileExp e
 
   e          -> error $ "not implemented compileexp " ++ show e
-
+{-
 dCond :: RelOp -> Compile ()
 dCond op = case op of
   GTH -> do
@@ -599,13 +724,23 @@ dCond op = case op of
     emit $ IConst (-1)
     emit I2D
     emit DCmp
+-}
 
+-- create the next label name
 newLabel :: Compile Label
 newLabel = do
   l <- gets nextLabel
   modify $ \st -> st { nextLabel = succ l }
   return l
 
+-- create the next register name
+newRegister :: Compile Value
+newRegister = do
+  v <- gets nextVar
+  modify $ \st -> st { nextVar = succ v }
+  return v
+
+-- create new block for if while loops etc
 inNewBlock :: Compile a -> Compile a
 inNewBlock cont = do
   modify $ \st -> st { cxt = [] : cxt st }
@@ -613,14 +748,14 @@ inNewBlock cont = do
   modify $ \st -> st { cxt = tail $ cxt st }
   return a
 
-
-newVar :: Ident -> Type -> Compile ()
+-- add new variable to the state
+newVar :: Ident -> LLVMType -> Compile ()
 newVar x t = do
   modify $ \st@St { cxt = (b : bs) } -> st { cxt = ((x, t) : b) : bs }
   updateLimitLocals
 
-
-lookupVar :: Ident -> Compile (Addr, Type)
+-- get type and register for a variable
+lookupVar :: Ident -> Compile (Register, LLVMType)
 lookupVar x = gets ((loop . concat) . cxt)
  where
   loop [] = error $ "unbound variable " ++ printTree x
@@ -647,12 +782,17 @@ modStack n = do
   when (new > old) $ modify $ \st -> st { limitStack = new }
 
 
+-- add llvm code line to output
 emit :: Code -> Compile ()
 emit (Store Void _    ) = return ()
 emit (Load  Void _    ) = return ()
-emit (Dup Void        ) = return ()
-emit (Pop Void        ) = return ()
+emit c = do
+  modify $ \st@St { output = cs } -> st { output = c : cs }
+  adjustStack c
+--emit (Dup Void        ) = return ()
+--emit (Pop Void        ) = return ()
 
+{-}
 emit (Inc t@Doub a k) = do
   emit $ Load t a
   emit $ DConst $ fromIntegral k
@@ -662,12 +802,10 @@ emit (Inc t@Doub a k) = do
 emit (IfCmp Doub o l) = do
   emit DCmp
   emit $ If o l
-
-emit c = do
-  modify $ \st@St { output = cs } -> st { output = c : cs }
-  adjustStack c
+  -}
 
 
+{-
 adjustStack :: Code -> Compile ()
 adjustStack = \case
   Store t _   -> decStack t
@@ -688,3 +826,4 @@ adjustStack = \case
   Mul t _     -> decStack t
   I2D         -> incStack Int
   Comment _   -> return ()
+-}
