@@ -17,10 +17,11 @@ import LlvmBackend
 --import Interpreter
 
 -- take type annotates syntax tree, compile it to llvm code and write to file
-llvm :: Prog -> IO ()
+llvm :: Prog -> IO ExitCode
 llvm p = do
   let code = compile "placeholder" p
   writeFile "placeholder.ll" code
+  exitSuccess
 
 -- | Parse and type check a program given by the @String@.
 check :: String -> IO ExitCode
@@ -37,12 +38,12 @@ check s = do
         Ok tree -> do
           hPutStrLn stderr "OK"
           llvm tree
-          exitSuccess
+          --exitSuccess
 
 -- | Main: read file passed by only command line argument and call 'check'.
 
 main :: IO ExitCode
 main = do
-  program <- hGetContents stdin
+  --program <- hGetContents stdin
   check "int main(){ foo(); return 0;} void foo() { printString(\"foo\"); return;}"
   --check program
