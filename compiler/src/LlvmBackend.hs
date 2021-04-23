@@ -40,7 +40,12 @@ compile
 --compile name _prg = header
 compile name (Program defs) = do
   --unlines $ concat (map (compileDef sig0) defs)
-  let prog = unlines (map (compileDef sig0) defs) 
+  --let code = map (compileDef sig0) defs
+  let code = compileDefs (initSt sig0) defs
+  let globs = intercalate "" (map snd code)
+  let funcs = unlines (map fst code)
+  let decl = unlines ["declare void @printInt(i32)", "declare void @printDouble(double)", "declare void @printString(i8*)", "declare i32 @readInt()", "declare double @readDouble()"]
+  let prog = decl ++ globs ++ "\n" ++ funcs
   reverse $ drop 2 $ reverse $ prog -- remove the last 2 extra newlines
   where
     sig0 = Map.fromList $ builtin ++ map sigEntry defs
@@ -52,6 +57,7 @@ compile name (Program defs) = do
 indent :: String -> String
 indent s | null s = s
 indent s | last s == ':' = s
+indent s | head s == '@' = s
 indent s = "\t" ++ s
 
 type Sig = Map Ident FunHead
@@ -68,7 +74,11 @@ data St = St
   , nextLabel    :: Label
   , nextVar      :: Register
   , output       :: Output
-  , prevResult    :: [Value]
+  , prevResult   :: [Value]
+  , globalOut    :: Output
+  , globals      :: Block
+  , nextGlobal   :: GlobalRegister
+  , params       :: [Register]
   }
 
 initSt :: Sig -> St
@@ -81,6 +91,10 @@ initSt s = St { sig          = s
               , nextVar      = R 0
               , output       = []
               , prevResult   = []
+              , globalOut    = []
+              , globals      = []
+              , nextGlobal   = G 0
+              , params       = []
               }
 
 type Addr = Int
@@ -178,7 +192,7 @@ instance ToJVM RelOp where
     EQU   -> "eq"
     NE    -> "ne"
 
-builtin :: [(Ident, FunHead)]
+builtin :: [(Ident, FunHead)] ------------------todo remove?
 builtin =
   [ (Ident "printInt",     FunHead (Ident "printInt") $ FunType Void [Int])
   , (Ident "printDouble",  FunHead (Ident "printDouble") $ FunType Void [Doub])
@@ -190,8 +204,11 @@ builtin =
 newtype Register = R {theRegister :: Int}
   deriving (Eq, Enum, Show)
 
+newtype GlobalRegister = G Int
+  deriving (Eq, Enum, Show)
+
 -- more like value or register
-data Value = LitInt Integer | LitDoub Double | LitBool Bool | LitString String | Reg Register
+data Value = LitInt Integer | LitDoub Double | LitBool Bool | LitString String | Reg Register | Glob GlobalRegister
   deriving(Show)
 
 data Code
@@ -220,6 +237,7 @@ data Code
   -- | Assign Value Code
   | Branch Label
   | BranchCond Value Label Label
+  | Global GlobalRegister LLVMType Value
   | Comment String
     deriving (Show)
 
@@ -252,10 +270,10 @@ flipCmp = \case
   --toJVM (FunType t ts) = "(" ++ (toJVM =<< ts) ++ ")" ++ toJVM t
 
 instance ToJVM FunHead where
-  toJVM (FunHead (Ident f) (FunType t ts)) = "define " ++ toJVM t ++ " @" ++ f ++ "(" ++ (toJVM =<< ts) ++ ")"
+  toJVM (FunHead (Ident f) (FunType t ts)) = "define " ++ toJVM t ++ " @" ++ f ++ "(" ++ ( reverse ( drop 2 ( reverse (((\t -> t ++ ", ") . toJVM) =<< ts)))) ++ ")"
 
 instance ToJVM Label where
-  toJVM (L l) = show l
+  toJVM (L l) = "lab" ++ show l
 
 prefix :: Type -> String
 prefix Int    = ""
@@ -279,15 +297,22 @@ impossible a = error $ "impossible code " ++ toJVM a
 
 instance ToJVM Value where
   toJVM = \case
-    LitInt i -> show i
-    LitDoub d -> show d
-    LitBool True -> "1" 
+    LitInt i      -> show i
+    LitDoub d     -> show d
+    LitBool True  -> "1" 
     LitBool False -> "0" 
-    LitString s -> show s 
-    Reg r -> toJVM r
+    LitString s   -> error $ "can only print adress to string, not string directly"
+    Reg r         -> toJVM r
+    Glob g        -> toJVM g 
     
 instance ToJVM Register where
-  toJVM (R r) = show r
+  toJVM (R r) = do
+    --f <- gets fun
+    let f = ""
+    "%r" ++ f ++ show r
+
+instance ToJVM GlobalRegister where
+  toJVM (G g) = "@g" ++ show g
 
 newtype Arguments = Args [(LLVMType, Value)]
   deriving(Show)
@@ -299,10 +324,10 @@ instance ToJVM Arguments where
 
 instance ToJVM Code where
   toJVM = \case
-    Store t1 from t2 to                     -> "store " ++ toJVM t1 ++ toJVM from ++ " , " ++ toJVM t2  ++ " " ++ toJVM to
+    Store t1 from t2 to                     -> "store " ++ toJVM t1 ++ " " ++  toJVM from ++ " , " ++ toJVM t2  ++ " " ++ toJVM to
     Load adr t1 t2 reg                      -> toJVM adr ++ " = load " ++ toJVM t1 ++ " , " ++ toJVM t2 ++ " " ++ toJVM reg
     Return t v                              -> "ret " ++ toJVM t ++ " " ++ toJVM v
-    ReturnVoid                              -> "ret"
+    ReturnVoid                              -> "ret void"
     Call adr t (Ident f) args               -> toJVM adr ++ " = call " ++ toJVM t ++ " @" ++ f ++ "(" ++ toJVM args ++ ")"
     CallVoid t (Ident f) args               -> "call " ++ toJVM t ++ " @" ++ f ++ "(" ++ toJVM args ++ ")"
     --DConst d  -> "ldc2_w " ++ show d
@@ -319,7 +344,7 @@ instance ToJVM Code where
 
     Label l                               -> toJVM l ++ ":"
     --Goto  l                   -> "goto " ++ toJVM l
-    Compare adr op t v1 v2 | t == Lit Int   -> toJVM adr ++ " = icmp " ++ toJVM op ++ " " ++ toJVM v1 ++ ", " ++ toJVM v2
+    Compare adr op t v1 v2 | t == Lit Int   -> toJVM adr ++ " = icmp " ++ toJVM op ++ " " ++ toJVM t ++ " " ++ toJVM v1 ++ ", " ++ toJVM v2
                            | t == Lit Doub  -> toJVM adr ++ " = fcmp " ++ toJVM op ++ " " ++ toJVM v1 ++ ", " ++ toJVM v2
     --If op                   l -> "if" ++ toJVM op ++ " " ++ toJVM l
 
@@ -341,31 +366,54 @@ instance ToJVM Code where
 
     --Assign adr c                          -> ToJVM adr ++ " = " ++ ToJVM c 
 
-    Branch lb                               -> "br Label " ++ toJVM lb
-    BranchCond c lb1 lb2                    -> "br i1 " ++ toJVM c ++ " , Label " ++ toJVM lb1 ++ " , Label " ++ toJVM lb1
+    Branch lb                               -> "br label " ++ toJVM lb
+    BranchCond c lb1 lb2                    -> "br i1 " ++ toJVM c ++ ", label %" ++ toJVM lb1 ++ ", label %" ++ toJVM lb2
+    Global adr t (LitString s)              -> toJVM adr ++ " = internal constant [" ++ show ( (length s) + 1) ++ " x i8] c\"" ++ s ++ "\\00\""
  
     --I2D                       -> "i2d"
 
     Comment ""                              -> ""
     Comment s                               -> "; " ++ s
 
-compileDef :: Sig -> TopDef -> String
-compileDef sig0 def@(FnDef t f args (Block ss)) = intercalate ""
-  [ toJVM (FunHead f $ funType def), " {\n"
-  , "entry:\n"
-  --, [ ".limit locals " ++ show (limitLocals st)
-   -- , ".limit stack " ++ show (limitStack st)
-   -- ]
-  , unlines $ map (indent . toJVM) $ reverse (output st)
-  , "}\n"
-  ]
-  where st = execState (compileFun t args ss) $ initSt sig0
+-- compile function
+compileDef :: St -> TopDef -> (String, String, St)
+compileDef st def@(FnDef t (Ident f) args (Block ss)) = do
+  let args' = Args $ zip (map (\(Argument t id) -> Lit t) args) (map (\x -> Reg x) (params st'))
+  let func = intercalate "" [ "define " ++ toJVM t ++ " @" ++ f ++ "(" ++ toJVM args' ++ " ) {\n", "entry:\n", unlines $ map (indent . toJVM) $ reverse $ (output st'), "}\n"]
+  let glob = unlines $ map toJVM $ reverse (globalOut st')
+  (func, glob, st')
+  where st' = execState (compileFun (Ident f) t args ss) st
 
--- compile the given function
-compileFun :: Type -> [Arg] -> [Stmt] -> Compile ()
-compileFun _ args ss = do
+-- compile functions
+compileDefs :: St -> [TopDef] -> [(String, String)]
+compileDefs st [] = []
+compileDefs st (d:ds) = do
+  let (s1,s2,st') = compileDef st d
+  let sss = compileDefs st' ds
+  (s1,s2):sss
+ 
+
+-- helper that adds ret void if needed before a label
+fixTerminator :: Compile ()
+fixTerminator = do
+  prev <- gets output
+  let instruction = head $ words $ toJVM $ head prev
+  if ( instruction == "br" || instruction == "ret")
+    then return ()
+    else emit $ ReturnVoid
+
+-- compile function helper
+compileFun :: Ident -> Type -> [Arg] -> [Stmt] -> Compile ()
+compileFun (Ident f) t0 args ss = do
+  modify $ \st -> st { output = []}
+  modify $ \st -> st { globalOut = []}
   mapM_ (\(Argument t' x) -> newVar x (Lit t')) args
+  regs <- mapM (\(Argument t' x) -> newRegister) args
+  modify $ \st -> st { params = regs}
   mapM_ compileStm ss
+  if (t0 == Void)
+    then emit ReturnVoid
+    else return ()
   --emit $ ReturnVoid --------------------- todo (was used to fix shit that end with if else?)
 
 -- creates a comment 
@@ -394,7 +442,7 @@ getPrevResult = do
 compileDecl :: Type -> Item -> Compile ()
 compileDecl t (Init id (ETyped e _)) = do
   newVar id (Lit t)
-  (a, _) <- lookupVar id
+  (a, _) <- lookupVar id ---------------------- redundant? todo
   compileExp (ETyped e t) False
   p <- getPrevResult
   r <- newRegister
@@ -402,7 +450,7 @@ compileDecl t (Init id (ETyped e _)) = do
   emit $ Store (Lit t) p (Ptr (Lit t)) r
 
   --emit $ Store t a
-compileDecls t (NoInit id) = do
+compileDecl t (NoInit id) = do
   newVar id (Lit t)      -------------------------------- todo should be t*?, i guess newvar should turn it into * by default
   r <- newRegister
   emit $ Alloca r (Ptr (Lit t))
@@ -432,14 +480,18 @@ compileStm s0 = do
       start <- newLabel
       t     <- newLabel
       f     <- newLabel
+      fixTerminator
       emit $ Label start
       --compileCond False l2 e
       compileExp e False -------------  todo true? idk
       r <- getPrevResult
       emit $ BranchCond r t f
+      fixTerminator
       emit $ Label t
       inNewBlock $ compileStm s
+      emit $ Branch start
       --emit $ Goto start
+      fixTerminator
       emit $ Label f
     BStmt (Block ss) -> do
       inNewBlock $ compileStms ss
@@ -457,11 +509,14 @@ compileStm s0 = do
       compileExp e False
       r <- getPrevResult
       emit $ BranchCond r t f
+      fixTerminator
       emit $ Label t
       inNewBlock $ compileStm s1
       emit $ Branch end
+      fixTerminator
       emit $ Label f
       inNewBlock $ compileStm s2
+      fixTerminator
       emit $ Label end
 
     Cond e s -> do
@@ -470,8 +525,10 @@ compileStm s0 = do
       compileExp e False
       r <- getPrevResult
       emit $ BranchCond r t f
+      fixTerminator
       emit $ Label t
       inNewBlock $ compileStm s
+      fixTerminator
       emit $ Label f
 
     Ass x e -> do
@@ -544,7 +601,10 @@ compileExp e0 b = case e0 of
   ELitTrue   -> setPrevVal (LitBool True) b
   ELitFalse  -> setPrevVal (LitBool False) b ---------- 1/ 0 ?
   ELitDoub d -> setPrevVal (LitDoub d) b
-  EString s  -> setPrevVal (LitString s) b
+  EString s  -> do
+    adr <- newGlobalRegister
+    emitGlobal $ Global adr (Lit String) (LitString s) 
+    setPrevVal (Glob adr) b
 
 {-
   ETyped (ELitInt i) Doub -> do
@@ -567,7 +627,7 @@ compileExp e0 b = case e0 of
     FunHead id (FunType t ts) <- gets ((fromMaybe (error "undefined") . Map.lookup x) . sig)
     let n_args = length ts
     allArgs <- gets prevResult
-    let args = take n_args allArgs ---------------------------- reverse? todo
+    let args = reverse $ take n_args allArgs ---------------------------- reverse? todo
     let ts' = map (\x -> (Lit x)) ts
     let args' = zip ts' args
     if (t == Void)
@@ -631,15 +691,17 @@ compileExp e0 b = case e0 of
     emit $ BranchCond e1_result t f 
 
     -- e2 true?
+    fixTerminator
     emit $ Label t 
     compileExp e2 False -- ok to overwrite e1_result
     allArgs2 <- gets prevResult
     let e2_result = head allArgs2
     emit $ BranchCond e2_result t2 f 
-
+    fixTerminator
     emit $ Label t2
     removeArgs 1
     setPrevVal (LitBool True) b
+    fixTerminator
     emit $ Label f
     removeArgs 1
     setPrevVal (LitBool False) b
@@ -656,15 +718,17 @@ compileExp e0 b = case e0 of
     emit $ BranchCond e1_result t f 
 
     -- e2 true?
+    fixTerminator
     emit $ Label f 
     compileExp e2 False -- ok to overwrite e1_result
     allArgs2 <- gets prevResult
     let e2_result = head allArgs2
     emit $ BranchCond e2_result t f2 
-
+    fixTerminator
     emit $ Label f2
     removeArgs 1
     setPrevVal (LitBool False) b
+    fixTerminator
     emit $ Label t
     removeArgs 1
     setPrevVal (LitBool True) b
@@ -682,11 +746,11 @@ compileExp e0 b = case e0 of
     allArgs <- gets prevResult
     let e_result = head allArgs
     emit $ BranchCond e_result t f
-
+    fixTerminator
     emit $ Label t
     removeArgs 1
     setPrevVal (LitBool False) b
-
+    fixTerminator
     emit $ Label f
     removeArgs 1
     setPrevVal (LitBool True) b --- todo, save to adress?
@@ -755,6 +819,13 @@ newRegister = do
   modify $ \st -> st { nextVar = succ v }
   return v
 
+-- create the next global register name
+newGlobalRegister :: Compile GlobalRegister
+newGlobalRegister = do
+  v <- gets nextGlobal
+  modify $ \st -> st { nextGlobal = succ v }
+  return v
+
 -- create new block for if while loops etc
 inNewBlock :: Compile a -> Compile a
 inNewBlock cont = do
@@ -817,6 +888,9 @@ modStack n = do
   when (new > old) $ modify $ \st -> st { limitStack = new }
 -}
 
+-- add global constant string to output
+emitGlobal :: Code -> Compile ()
+emitGlobal c = modify $ \st@St { globalOut = cs } -> st { globalOut = c : cs }
 
 -- add llvm code line to output
 emit :: Code -> Compile ()

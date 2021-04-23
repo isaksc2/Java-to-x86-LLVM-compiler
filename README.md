@@ -1,5 +1,13 @@
 # TDA283
 
+kanske spara namnet med int i reg --> Register = Reg "fun" 2
+
+
+show string:
+print adress = constant at top
+print adress
+
+
 -- llvm
 
 @puts = print?
@@ -29,6 +37,9 @@ i compiler:
 bnfc -dm src/javalette.cf
 
 cd c:;cd "\_it\git repos\TDA283\test"
+
+
+bash runtest.sh -l -- partB-1.tar.gz
 
 tar -czvf partA-1.tar.gz -C ../compiler .
 
