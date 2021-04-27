@@ -63,7 +63,7 @@ indent s                 = "\t" ++ s
 
 type Sig = Map Ident FunHead
 type Cxt = [Block]
-type Block = [(Ident, LLVMType)]
+type Block = [(Ident, Register, LLVMType)]
 
 
 data St = St
@@ -73,9 +73,10 @@ data St = St
   , currentStack :: Int
   , limitStack   :: Int
   , nextLabel    :: Label
-  , nextVar      :: Register
+  , nextReg      :: Register
+  , nextVar      :: Variable
   , output       :: Output
-  , prevResult   :: [Value]
+  , prevResult   :: [(Value, LLVMType)]
   , globalOut    :: Output
   , globals      :: Block
   , nextGlobal   :: GlobalRegister
@@ -89,7 +90,8 @@ initSt s = St { sig          = s
               , currentStack = 0
               , limitStack   = 0
               , nextLabel    = L 0
-              , nextVar      = R 0
+              , nextReg      = R 0
+              , nextVar      = V 0
               , output       = []
               , prevResult   = []
               , globalOut    = []
@@ -135,7 +137,7 @@ instance Size Ident where
   -}
 
 -- update or add argument
-setPrevVal :: Value -> Bool -> Compile ()
+setPrevVal :: (Value, LLVMType) -> Bool -> Compile ()
 setPrevVal v False = do 
   vs <- gets prevResult
   if (length vs == 0)
@@ -177,24 +179,37 @@ instance ToJVM Type where
     Doub   -> "double"
     String -> "i8*"
 
+prefixMulOp :: LLVMType -> MulOp -> String
+prefixMulOp (Lit Int) Times = "mul"
+prefixMulOp (Lit Doub) Times = "fmul"
+prefixMulOp (Lit Doub) Div = "fdiv"
+prefixMulOp (Lit Int) Div = "sdiv"
+prefixMulOp (Lit Int) Mod = "srem"
+
+{-
 instance ToJVM MulOp where
   toJVM op = case op of
     Times -> "mul"
     Div   -> "div"
     Mod   -> "srem"
-
+-}
 instance ToJVM AddOp where
   toJVM op = case op of
     Plus  -> "add"
     Minus -> "sub"
 
+prefixRelOp :: LLVMType -> RelOp -> String
+prefixRelOp (Lit Doub) op                         = "o" ++ toJVM op
+prefixRelOp (Lit Int)  op | op == EQU || op == NE =        toJVM op
+prefixRelOp (Lit Int)  op                         = "s" ++ toJVM op
+prefixRelOp (Lit Bool) op                         = prefixRelOp (Lit Int) op
 
 instance ToJVM RelOp where
   toJVM op = case op of
-    LTH   -> "slt"
-    GTH   -> "sgt"
-    LE    -> "sle"
-    GE    -> "sge"
+    LTH   -> "lt"
+    GTH   -> "gt"
+    LE    -> "le"
+    GE    -> "ge"
     EQU   -> "eq"
     NE    -> "ne"
 
@@ -208,6 +223,9 @@ builtin =
   ]
 
 newtype Register = R {theRegister :: Int}
+  deriving (Eq, Enum, Show)
+
+newtype Variable = V {theVariable :: Int}
   deriving (Eq, Enum, Show)
 
 newtype GlobalRegister = G Int
@@ -282,9 +300,9 @@ instance ToJVM Label where
   toJVM (L l) = "lab" ++ show l
 
 prefix :: Type -> String
-prefix Int    = ""
+prefix Int    = "s"
 prefix Bool   = ""
-prefix Doub   = "f"
+prefix Doub   = "o"
 prefix Void   = ""
 prefix String = ""
 
@@ -313,7 +331,6 @@ instance ToJVM Value where
     
 instance ToJVM Register where
   toJVM (R r) = do
-    --f <- gets fun
     let f = ""
     "%r" ++ f ++ show r
 
@@ -322,6 +339,7 @@ instance ToJVM GlobalRegister where
 
 newtype Arguments = Args [(LLVMType, Value)]
   deriving(Show)
+
 
 instance ToJVM Arguments where
   toJVM (Args []) = ""
@@ -350,8 +368,8 @@ instance ToJVM Code where
 
     Label l                                -> toJVM l ++ ":"
     --Goto  l                   -> "goto " ++ toJVM l
-    Compare adr op t v1 v2 | t == Lit Doub -> toJVM adr ++ " = fcmp " ++ toJVM op ++ " " ++ toJVM t ++ " " ++ toJVM v1 ++ ", " ++ toJVM v2
-                           | otherwise     -> toJVM adr ++ " = icmp " ++ toJVM op ++ " " ++ toJVM t ++ " " ++ toJVM v1 ++ ", " ++ toJVM v2
+    Compare adr op t v1 v2 | t == Lit Doub -> toJVM adr ++ " = fcmp " ++ prefixRelOp t op ++ " " ++ toJVM t ++ " " ++ toJVM v1 ++ ", " ++ toJVM v2
+                           | otherwise     -> toJVM adr ++ " = icmp " ++ prefixRelOp t op ++ " " ++ toJVM t ++ " " ++ toJVM v1 ++ ", " ++ toJVM v2
     --If op                   l -> "if" ++ toJVM op ++ " " ++ toJVM l
 
     --c@(IfCmp Doub _ _) -> impossible c
@@ -363,17 +381,16 @@ instance ToJVM Code where
      --Inc Int a k          -> "iinc " ++ show a ++ " " ++ show k
     --c@Inc{}                   -> impossible c
 
-    Add adr op t v1 v2 | t == Lit Int           -> toJVM adr ++ " = "        ++ toJVM op ++ " " ++ toJVM t ++ " " ++ toJVM v1 ++ ", " ++ toJVM v2
-                       | t == Lit Doub          -> toJVM adr ++ " = " ++ "f" ++ toJVM op ++ " " ++ toJVM t ++ " " ++ toJVM v1 ++ ", " ++ toJVM v2
-    Mul adr op t v1 v2 | t == Lit Int           -> toJVM adr ++ " = "        ++ toJVM op ++ " " ++ toJVM t ++ " " ++ toJVM v1 ++ ", " ++ toJVM v2
-                       | t == Lit Doub          -> toJVM adr ++ " = " ++ "f" ++ toJVM op ++ " " ++ toJVM t ++ " " ++ toJVM v1 ++ ", " ++ toJVM v2
+    Add adr op t v1 v2 | t == Lit Int           -> toJVM adr ++ " = "        ++ toJVM op    ++ " " ++ toJVM t ++ " " ++ toJVM v1 ++ ", " ++ toJVM v2
+                       | t == Lit Doub          -> toJVM adr ++ " = " ++ "f" ++ toJVM op    ++ " " ++ toJVM t ++ " " ++ toJVM v1 ++ ", " ++ toJVM v2
+    Mul adr op t v1 v2                          -> toJVM adr ++ " = " ++ (prefixMulOp t op) ++ " " ++ toJVM t ++ " " ++ toJVM v1 ++ ", " ++ toJVM v2
     
     Alloca adr t                                -> toJVM adr ++ " = alloca " ++ toJVM t
 
     --Assign adr c                          -> ToJVM adr ++ " = " ++ ToJVM c 
 
-    Branch lb                               -> "br label " ++ toJVM lb
-    BranchCond c lb1 lb2                    -> "br i1 " ++ toJVM c ++ ", label %" ++ toJVM lb1 ++ ", label %" ++ toJVM lb2
+    Branch lb                               -> "br label %" ++ toJVM lb
+    BranchCond c lb1 lb2                  -> "br i1 " ++ toJVM c ++ ", label %" ++ toJVM lb1 ++ ", label %" ++ toJVM lb2 ----- todo remove t, has to be i1
     Global adr t (LitString s)              -> toJVM adr ++ " = internal constant [" ++ show ( (length s) + 1) ++ " x i8] c\"" ++ s ++ "\\00\""
  
     --I2D                       -> "i2d"
@@ -421,15 +438,16 @@ compileFun :: Ident -> Type -> [Arg] -> [Stmt] -> Compile ()
 compileFun (Ident f) t0 args ss = do
   modify $ \st -> st { output = []}
   modify $ \st -> st { globalOut = []}
-  mapM_ (\(Argument t' x) -> newVar x (Lit t')) args
   regs <- mapM (\(Argument t' x) -> newRegister) args
+  let arg_reg = zip args regs
+  mapM_ (\(Argument t' x, r) -> newVar x r (Lit t')) arg_reg
   modify $ \st -> st { params = regs}
   mapM_ compileStm ss
   -- add "ret void" if no return statement at the end
   if (t0 == Void)
     then do 
       prevStm <- gets output
-      if ((head $ words $ toJVM $ head prevStm) == "ret")
+      if (length prevStm /= 0 && (head $ words $ toJVM $ head prevStm) == "ret")
         then return ()
         else emit ReturnVoid
     else return ()
@@ -451,7 +469,7 @@ comment = emit . Comment
 blank :: Compile ()
 blank = comment ""
 
-getPrevResult :: Compile Value
+getPrevResult :: Compile (Value, LLVMType)
 getPrevResult = do
   allArgs <- gets prevResult
   return $ head allArgs
@@ -459,19 +477,20 @@ getPrevResult = do
 -- help function for compiling variable declaration
 compileDecl :: Type -> Item -> Compile ()
 compileDecl t (Init id (ETyped e _)) = do
-  newVar id (Ptr (Lit t)) ---------------- todo used to only be lit
-  (a, _) <- lookupVar id ---------------------- redundant? todo
   compileExp (ETyped e t) False
+  r <- newRegister
+  newVar id r (Ptr (Lit t)) ---------------- todo used to only be lit
+  emit $ Alloca r (Lit t)
   p <- getPrevResult
-  r <- newRegister
-  emit $ Alloca r (Lit t)
-  emit $ Store (Lit t) p (Ptr (Lit t)) r
+  p' <- loadReg p
+  emit $ Store (Lit t) p' (Ptr (Lit t)) r
 
-  --emit $ Store t a
 compileDecl t (NoInit id) = do
-  newVar id (Ptr (Lit t))      -------------------------------- todo should be t*?, i guess newvar should turn it into * by default
   r <- newRegister
+  newVar id r (Ptr (Lit t))      -------------------------------- todo should be t*?, i guess newvar should turn it into * by default
   emit $ Alloca r (Lit t)
+
+
 
 -- compile statement
 compileStm :: Stmt -> Compile ()
@@ -484,7 +503,8 @@ compileStm s0 = do
     Ret e@(ETyped _ t) -> do
       compileExp e False
       r <- getPrevResult
-      emit $ Return (Lit t) r
+      r' <- loadReg r
+      emit $ Return (Lit t) r'
     VRet -> do
       emit $ ReturnVoid ----------------------------------- rätt?
 
@@ -494,7 +514,7 @@ compileStm s0 = do
       compileExp e False
       --emit $ Pop t
       -- removeArgs 1? -------------------------- todo
-    While e s -> do
+    While e@(ETyped _ typ) s -> do
       start <- newLabel
       t     <- newLabel
       f     <- newLabel
@@ -503,7 +523,8 @@ compileStm s0 = do
       --compileCond False l2 e
       compileExp e False -------------  todo true? idk
       r <- getPrevResult
-      emit $ BranchCond r t f
+      r' <- loadReg r
+      emit $ BranchCond r' t f
       emit $ Label t
       inNewBlock $ compileStm s
       emit $ Branch start
@@ -517,12 +538,13 @@ compileStm s0 = do
         compileStm s
         compileStms ss'
 
-    CondElse e s1 s2 -> do
+    CondElse e@(ETyped _ typ) s1 s2 -> do
       compileExp e False ------------------- todo maybe issue?
-      r <- getPrevResult
       t   <- newLabel
       f   <- newLabel
-      emit $ BranchCond r t f
+      r <- getPrevResult
+      r' <- loadReg r
+      emit $ BranchCond r' t f
       emit $ Label t
       inNewBlock $ compileStm s1
       end <- newLabel
@@ -532,45 +554,51 @@ compileStm s0 = do
       emit $ Branch end
       emit $ Label end
 
-    Cond e s -> do
+    Cond e@(ETyped _ typ) s -> do
       t   <- newLabel
       f   <- newLabel
       compileExp e False
       r <- getPrevResult
-      emit $ BranchCond r t f
+      r' <- loadReg r
+      emit $ BranchCond r' t f
       emit $ Label t
       inNewBlock $ compileStm s
       emit $ Branch f
       emit $ Label f
 
-    Ass x e -> do
+    Ass x e@(ETyped _ typ) -> do
       compileExp e False
       (a, t) <- lookupVar x
       r <- getPrevResult
-      emit $ Store t r (Ptr t) a
+      r' <- loadReg r
+      emit $ Store (Lit typ) r' (Ptr (Lit typ)) a
 
     Empty -> return ()
     Incr i -> do
       (adr, t) <- lookupVar i
+      adr''' <- loadReg (Reg adr, t)
       adr' <- newRegister
-      if (t == (Lit Int))
+      let adr'' = (\(Reg x) -> x) adr'''
+      if (t == (Lit Int) || t == (Ptr (Lit Int)))
         then do
-          emit $ Add adr' Plus t (Reg adr) (LitInt 1)
-          emit $ Store t (Reg adr') (Ptr t) adr
+          emit $ Add adr' Plus (Lit Int) (Reg adr'') (LitInt 1)
+          emit $ Store (Lit Int) (Reg adr') t $ adr ----- todo probably only need to supply 1 type to add / mul
         else do
-          emit $ Add adr' Plus t (Reg adr) (LitDoub 1.0)
-          emit $ Store t (Reg adr') (Ptr t) adr
+          emit $ Add adr' Plus (Lit Doub) (Reg adr'') (LitDoub 1.0)
+          emit $ Store (Lit Doub) (Reg adr') t adr
 
     Decr i -> do
       (adr, t) <- lookupVar i
+      adr''' <- loadReg (Reg adr, t)
       adr' <- newRegister
-      if (t == (Lit Int))
+      let adr'' = (\(Reg x) -> x) adr'''
+      if (t == (Lit Int) || t == (Ptr (Lit Int)))
         then do
-          emit $ Add adr' Minus t (Reg adr) (LitInt 1)
-          emit $ Store t (Reg adr') (Ptr t) adr
+          emit $ Add adr' Minus (Lit Int) (Reg adr'') (LitInt 1)
+          emit $ Store (Lit Int) (Reg adr') t adr
         else do
-          emit $ Add adr' Minus t (Reg adr) (LitDoub 1.0)
-          emit $ Store t (Reg adr') (Ptr t) adr
+          emit $ Add adr' Minus (Lit Doub) (Reg adr'') (LitDoub 1.0)
+          emit $ Store (Lit Doub) (Reg adr') t adr
 
     s -> error $ "not implemented compileStm " ++ printTree s
 
@@ -609,14 +637,14 @@ type2LLVMType t = Lit t
 compileExp :: Expr -> Bool -> Compile ()
 compileExp e0 b = case e0 of
   --ETyped e Doub -> error $ printTree e --compileExp e
-  ELitInt i  -> setPrevVal (LitInt i) b
-  ELitTrue   -> setPrevVal (LitBool True) b
-  ELitFalse  -> setPrevVal (LitBool False) b ---------- 1/ 0 ?
-  ELitDoub d -> setPrevVal (LitDoub d) b
+  ELitInt i  -> setPrevVal (LitInt i, Lit Int) b
+  ELitTrue   -> setPrevVal (LitBool True, Lit Bool) b
+  ELitFalse  -> setPrevVal (LitBool False, Lit Bool) b ---------- 1/ 0 ?
+  ELitDoub d -> setPrevVal (LitDoub d, Lit Doub) b
   EString s  -> do
     adr <- newGlobalRegister
     emitGlobal $ Global adr (Lit String) (LitString s) 
-    setPrevVal (Glob adr) b
+    setPrevVal (Glob adr, Lit String) b
 
 {-
   ETyped (ELitInt i) Doub -> do
@@ -632,14 +660,14 @@ compileExp e0 b = case e0 of
   EVar x -> do
     (a, t) <- lookupVar x
     --emit $ Load t a
-    setPrevVal (Reg a) b
+    setPrevVal (Reg a, t) b
 
   EApp x@(Ident _) es -> do
     mapM_ (\e -> compileExp e True) es
     FunHead id (FunType t ts) <- gets ((fromMaybe (error "undefined") . Map.lookup x) . sig)
     let n_args = length ts
     allArgs <- gets prevResult
-    let args = reverse $ take n_args allArgs
+    args <- mapM (\x -> loadReg x) (reverse $ take n_args allArgs)
     let ts' = map (\x -> (Lit x)) ts
     let args' = zip ts' args
     if (t == Void)
@@ -650,7 +678,7 @@ compileExp e0 b = case e0 of
         r <- newRegister
         emit $ Call r   (type2LLVMType t) id (Args args')
         removeArgs n_args
-        setPrevVal (Reg r) b
+        setPrevVal (Reg r, (Lit t)) b --- ptr? todo
 
 
   --EPre op i -> do
@@ -665,28 +693,50 @@ compileExp e0 b = case e0 of
     compileExp e2 True
     r <- newRegister
     allArgs <- gets prevResult
-    let args = take 2 allArgs
-    emit $ Mul r op (type2LLVMType t) (head args) (head (tail args))
+    args' <- mapM (\x -> loadReg x) $ take 2 allArgs
+    let [arg1, arg2] = args'
+    
+
+{-
+    (arg1', arg2', changed) <- matchTypes t arg1 arg2
+
+    let t' = if (changed)
+                then Ptr ((type2LLVMType t))
+                else (type2LLVMType t)
+-}
+
+    emit $ Mul r op (Lit t) arg2 arg1
     removeArgs 2
-    setPrevVal (Reg r) b
+    setPrevVal (Reg r, (Lit t)) b --- ptr? todo
 
   ETyped (EAdd e1 op e2) t -> do
     compileExp e1 True
     compileExp e2 True
     r <- newRegister
     allArgs <- gets prevResult
-    let args = take 2 allArgs
-    emit $ Add r op (type2LLVMType t) (head args) (head (tail args))
+    args' <- mapM (\x -> loadReg x) $ take 2 allArgs
+    let [arg1, arg2] = args'
+    
+
+{-
+    (arg1', arg2', changed) <- matchTypes t arg1 arg2
+
+    let t' = if (changed)
+                then Ptr ((type2LLVMType t))
+                else (type2LLVMType t)
+-}
+
+    emit $ Add r op (Lit t) arg2 arg1
     removeArgs 2
-    setPrevVal (Reg r) b ---- todo fel, gör som i add.
+    setPrevVal (Reg r, (Lit t)) b ---- todo fel, gör som i add.
 
   ETyped (ERel e1@(ETyped _ t1) op e2) _ -> do
     compileExp e1 True
     compileExp e2 True
     allArgs <- gets prevResult
-    let args = take 2 allArgs
-    let arg1 = head args
-    let arg2 = head $ tail args
+    args' <- mapM (\x -> loadReg x) $ take 2 allArgs
+    let [arg1, arg2] = args'
+    
     {-
     if (arg1 /= (Reg x) && arg2 == (Reg y))
       then do
@@ -703,28 +753,28 @@ compileExp e0 b = case e0 of
           emit $ Store (Lit t1) (Val y) (Ptr (Lit t1)) lit
         else return ()
 -}
-
-    (arg1', arg2', changed) <- val2Reg t1 arg1 arg2
+{-
+    (arg1', arg2', changed) <- matchTypes t1 arg1 arg2
 
     let t1' = if (changed)
                 then Ptr ((type2LLVMType t1))
                 else (type2LLVMType t1)
-      
+  -}    
     --let arg1' = arg1
     --let arg2' = arg2
     --let t1' = type2LLVMType t1
     r <- newRegister
-    emit $ Compare r op t1' arg2' arg1'
+    emit $ Compare r op (Lit t1) arg2 arg1
     removeArgs 2
-    setPrevVal (Reg r) b
+    setPrevVal (Reg r, (Lit Bool)) b --------------- Lit r if not changed? todo
     -- br i1 %t2, label %lab2, label %lab1
 
   EAnd e1 e2 -> do
 
     -- e1 true?
     compileExp e1 True
-    allArgs <- gets prevResult
-    let e1_result = head allArgs
+    r1 <- getPrevResult
+    e1_result <- loadReg r1
     t  <- newLabel
     f  <- newLabel
     result <- newRegister
@@ -735,8 +785,8 @@ compileExp e0 b = case e0 of
     --fixTerminator
     emit $ Label t 
     compileExp e2 False -- ok to overwrite e1_result
-    allArgs2 <- gets prevResult
-    let e2_result = head allArgs2
+    r2 <- getPrevResult
+    e2_result <- loadReg r2
     t2 <- newLabel
     emit $ BranchCond e2_result t2 f
     --fixTerminator
@@ -753,14 +803,14 @@ compileExp e0 b = case e0 of
     emit $ Branch end
     emit $ Label end
     removeArgs 1
-    setPrevVal (Reg result) b
+    setPrevVal (Reg result, Ptr (Lit Bool)) b ---------------- litbool result? todo
 
   EOr e1 e2 -> do
 
     -- e1 true?
     compileExp e1 True
-    allArgs <- gets prevResult
-    let e1_result = head allArgs
+    r1 <- getPrevResult
+    e1_result <- loadReg r1
     t  <- newLabel
     f  <- newLabel
     result <- newRegister
@@ -771,8 +821,8 @@ compileExp e0 b = case e0 of
     --fixTerminator
     emit $ Label f 
     compileExp e2 False -- ok to overwrite e1_result
-    allArgs2 <- gets prevResult
-    let e2_result = head allArgs2
+    r2 <- getPrevResult
+    e2_result <- loadReg r2
     f2 <- newLabel
     emit $ BranchCond e2_result t f2 
     --fixTerminator
@@ -788,7 +838,7 @@ compileExp e0 b = case e0 of
     emit $ Branch end
     emit $ Label end
     removeArgs 1
-    setPrevVal (Reg result) b
+    setPrevVal (Reg result, Ptr (Lit Bool)) b --------- todo
 
   Neg (ETyped e t) -> do
     if (t == Int)
@@ -798,8 +848,8 @@ compileExp e0 b = case e0 of
 
   Not (ETyped e Bool) -> do
     compileExp e True
-    allArgs <- gets prevResult
-    let e_result = head allArgs
+    r <- getPrevResult
+    e_result <- loadReg r
     t <- newLabel
     f <- newLabel
     end <- newLabel
@@ -817,7 +867,7 @@ compileExp e0 b = case e0 of
     emit $ Branch end
     emit $ Label end
     removeArgs 1
-    setPrevVal (Reg result) b --- todo, save to adress?
+    setPrevVal (Reg result, Ptr (Lit Bool)) b --- todo
 
   ETyped e _ -> compileExp e b
 
@@ -879,8 +929,8 @@ newLabel = do
 -- create the next register name
 newRegister :: Compile Register
 newRegister = do
-  v <- gets nextVar
-  modify $ \st -> st { nextVar = succ v }
+  v <- gets nextReg
+  modify $ \st -> st { nextReg = succ v }
   return v
 
 -- create the next global register name
@@ -899,11 +949,12 @@ inNewBlock cont = do
   return a
 
 -- add new variable to the state
-newVar :: Ident -> LLVMType -> Compile ()
-newVar x t = do
-  modify $ \st@St { cxt = (b : bs) } -> st { cxt = ((x, t) : b) : bs }
+newVar :: Ident -> Register -> LLVMType -> Compile ()
+newVar x r t = do
+  modify $ \st@St { cxt = (b : bs) } -> st { cxt = ((x, r, t) : b) : bs }
   --updateLimitLocals
 
+{-
 -- get type and register for a variable
 lookupVar :: Ident -> Compile (Register, LLVMType)
 lookupVar x = gets ((loop . concat) . cxt)
@@ -911,6 +962,28 @@ lookupVar x = gets ((loop . concat) . cxt)
   loop [] = error $ "unbound variable " ++ printTree x
   loop ((y, t) : bs) | x == y    = (R $ length bs, t)
                      | otherwise = loop bs
+                     -}
+
+-- get type and register for a variable
+lookupVar :: Ident -> Compile (Register, LLVMType)
+lookupVar id = do 
+  c <- gets cxt
+  return (fromJust $ cxtContains id c)
+  where
+    cxtContains :: Ident -> [[(Ident, Register, LLVMType)]] -> Maybe (Register, LLVMType)
+    cxtContains id [] = Nothing
+    cxtContains id (b:bs) = do 
+      let firstSearch = contains id b 
+      if (isNothing firstSearch )
+        then cxtContains id bs
+        else firstSearch
+      where
+        contains :: Ident -> [(Ident, Register, LLVMType)] -> Maybe (Register, LLVMType)
+        contains id [] = Nothing
+        contains id ((id', r, t):vs) = if (id == id')
+          then Just (r, t)
+          else contains id vs
+
 
 {-
 lookupVar x = do
@@ -1003,16 +1076,27 @@ adjustStack = \case
 -}
 
 -- convert literal operand to register if the other operand is register 
-val2Reg :: Type -> Value -> Value -> Compile (Value, Value, Bool)
-val2Reg _ (Reg r1) (Reg r2) = return ((Reg r1), (Reg r2), False)
-val2Reg _ (LitInt r1) (LitInt r2) = return ((LitInt r1), (LitInt r2), False)
-val2Reg _ (LitDoub r1) (LitDoub r2) = return ((LitDoub r1), (LitDoub r2), False)
-val2Reg _ (LitBool r1) (LitBool r2) = return ((LitBool r1), (LitBool r2), False)
-val2Reg t (Reg r1) r2 = do
+matchTypes :: Type -> Value -> Value -> Compile (Value, Value, Bool)
+matchTypes _ (Reg r1) (Reg r2) = return ((Reg r1), (Reg r2), False)
+matchTypes _ (LitInt r1) (LitInt r2) = return ((LitInt r1), (LitInt r2), False)
+matchTypes _ (LitDoub r1) (LitDoub r2) = return ((LitDoub r1), (LitDoub r2), False)
+matchTypes _ (LitBool r1) (LitBool r2) = return ((LitBool r1), (LitBool r2), False)
+matchTypes t (Reg r1) r2 = do
   r2' <- newRegister
   emit $ Alloca r2' (type2LLVMType t)
   emit $ Store (Lit t) r2 (Ptr (Lit t)) r2'
   return (Reg r1, Reg r2', True)
-val2Reg t r1 (Reg r2) = do
-  (_, r1', _) <- val2Reg t (Reg r2) r1
-  return ((Reg r2), r1', True)
+matchTypes t r1 (Reg r2) = do
+  (_, r1', _) <- matchTypes t (Reg r2) r1
+  return (r1',(Reg r2), True)
+
+
+
+-- load register
+loadReg :: (Value, LLVMType) -> Compile Value ---------- todo, var = reg ptr, temp = reg lit
+loadReg (Reg r, Ptr (Lit t)) = do 
+  r' <- newRegister
+  --let (Reg r'') = r
+  emit $ Load r' (Lit t) (Ptr (Lit t)) r
+  return (Reg r')
+loadReg (r, Lit t) = return r
