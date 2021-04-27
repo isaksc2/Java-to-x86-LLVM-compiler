@@ -19,8 +19,9 @@ import LlvmBackend
 -- take type annotates syntax tree, compile it to llvm code and write to file
 llvm :: Prog -> IO ExitCode
 llvm p = do
-  let code = compile "maaain" p
-  writeFile "maaain.ll" code
+  let code = compile "main" p
+  writeFile "main.ll" code
+  putStrLn code
   exitSuccess
 
 -- | Parse and type check a program given by the @String@.
@@ -47,4 +48,6 @@ main = do
   program <- hGetContents stdin
   --check "int main(){ foo(); int a = 3; a = 2; double b = 3.0; double c = b*2.0;  return 0;} void lol(){while (false) {1; 2;} printString(\"foo2\"); printString(\"foasdasdo\"); printString(\"fssssssoo\");} void foo() { printString(\"foo\"); while (false) {printInt(1); printDouble(2.9);} return; int a = 3 + 3*4;}"
   --check "int main() {many_params(1,2,3,4,100.0,100.0,100.0,100.0,5,6,7,8,9,10,11,12,13,14,15,16);return 0;}void many_params(int x1, int x2, int x3, int x4,double d1, double d2, double d3, double d4,int y1, int y2, int y3, int y4,int z1, int z2, int z3, int z4,int q1, int q2, int q3, int q4) {printInt(x1);printInt(y1);printInt(z1);printInt(q1);printDouble(d1);if (x1 != 2) {many_params(q4,x1,x2,x3,d4/2.0,d1*2.0,d2+1.0,d3-0.0,x4,y1,y2,y3,y4,z1,z2,z3,z4,q1,q2,q3);}}"
+  --check "/* Test boolean operators */int main () {int x = 4;if (3 <= x && 4 != 2 && true) {printBool(true);} else {printString(\"apa\");}printBool(true == true || dontCallMe(1));printBool(4.0 < -50.0 && dontCallMe(2));printBool(4 == x && true == !false && true);printBool(implies(false,false));printBool(implies(false,true));printBool(implies(true,false));printBool(implies(true,true));return 0 ;}boolean dontCallMe(int x) {printInt(x);return true;}void printBool(boolean b) {if (b) {printString(\"true\");} else {printString(\"false\");}return;} boolean implies(boolean x, boolean y) {return !x || x == y;}"
+  --check "/* Test boolean operators */ int main () {int x = 4; if (3 <= x && 4 != 2 && true) {printString(\"a\");} else {printString(\"apa\");}return 0 ;}boolean dontCallMe(int x) {printInt(x);return true;}boolean implies(boolean x, boolean y) {return !x || x == y;}"
   check program
