@@ -37,6 +37,7 @@ data Stmt
     | CondElse Expr Stmt Stmt
     | While Expr Stmt
     | SExp Expr
+    | Retting Stmt Integer
   deriving (C.Eq, C.Ord, C.Show, C.Read)
 
 data Item = NoInit Ident | Init Ident Expr

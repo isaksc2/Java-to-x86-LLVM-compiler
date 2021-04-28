@@ -48,6 +48,9 @@ While.     Stmt ::= "while" "(" Expr ")" Stmt ;
 
 SExp.      Stmt ::= Expr  ";" ;
 
+internal   Retting. Stmt ::= "[" Stmt ":" Integer "]" ; ------------------------------------------- edit
+
+
 -- Types ---------------------------------------------------
 
 Int.       Type ::= "int" ;
@@ -94,7 +97,7 @@ EAnd.      Expr1 ::= Expr2 "&&" Expr1 ;
 
 EOr.       Expr ::= Expr1 "||" Expr ;
 
-internal   ETyped. Expr ::= "[" Expr ":" Type "]" ; --------------------- edit
+internal   ETyped. Expr ::= "[" Expr ":" Type "]" ; ------------------------------------------- edit
 
 
 coercions  Expr 6 ;

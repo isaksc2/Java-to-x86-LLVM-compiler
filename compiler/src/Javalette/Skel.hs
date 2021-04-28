@@ -39,6 +39,7 @@ transStmt x = case x of
   Javalette.Abs.CondElse expr stmt1 stmt2 -> failure x
   Javalette.Abs.While expr stmt -> failure x
   Javalette.Abs.SExp expr -> failure x
+  Javalette.Abs.Retting stmt integer -> failure x
 transItem :: Javalette.Abs.Item -> Result
 transItem x = case x of
   Javalette.Abs.NoInit ident -> failure x

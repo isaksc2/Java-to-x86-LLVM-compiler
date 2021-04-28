@@ -243,14 +243,14 @@ checkStm :: Env -> Type -> Stmt -> Bool -> Err (Env, Stmt, Bool)
 checkStm env val x main = case x of
   SExp exp -> do
     exp' <- inferExp env exp
-    return (env, SExp exp', False)
+    return (env, Retting (SExp exp') 0, False)
 
   Decl typ items -> do
     if (typ == String)
       then Bad "variable cant have type string"
       else do
         (env', items') <- checkDecls env typ items
-        return (env', Decl typ items', False)
+        return (env', Retting (Decl typ items') 0, False)
 
   Ret exp -> do
     if (main && exp /= (ELitInt 0))
@@ -258,11 +258,11 @@ checkStm env val x main = case x of
       else do
         checkExp env val exp
         exp' <- inferExp env exp
-        return (env, Ret exp', True)
+        return (env, Retting (Ret exp') 1, True)
 
   VRet -> do
     if (val == Void)
-      then return (env, VRet, True)
+      then return (env, Retting (VRet) 1, True)
       else Bad ( "returns void but expected " ++ printTree val )
 
   While exp stm -> do
