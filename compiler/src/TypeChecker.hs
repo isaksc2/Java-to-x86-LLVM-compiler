@@ -216,7 +216,7 @@ checkStms e _ [] main = return (e, [], 0)
 checkStms e Void (s:ss) False = do
   (e', s') <- checkStm e Void s False
   (e'', ss', _) <- checkStms e' Void ss False
-  return (e'', s':ss', 0)
+  return (e'', s':ss', 1)
 -- general case
 checkStms env typ (s : ss) main = do
   (env' , s') <- checkStm env typ s main

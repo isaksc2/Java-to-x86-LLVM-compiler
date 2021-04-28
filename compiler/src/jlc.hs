@@ -57,5 +57,5 @@ main = do
   --check "int main() {return 0;}"
   --check "int foo(int n) {if (n < 100) {n = foo(foo(n + 11));}return n;}int main() {printInt(foo(1));return 0;}"
   --"int main() {printInt(fac(5));return 0 ;}int fac (int a) {int r;int n;r = 1;n = a;while (n > 0){r = r * n;n = n - 1;}  return r;}"
-  check "int main() {if (true) {printInt(1);return 0;}}"
-  --check program
+  --check "int main() {if (true) {printInt(1);return 0;}}"
+  check program
