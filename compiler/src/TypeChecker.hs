@@ -189,7 +189,7 @@ checkFun :: Env -> TopDef -> Err (Env, TopDef)
 checkFun env (FnDef result id args (Block ss)) = do
   env' <- addArgs env args
   (_, ss', returns) <- checkStms env' result ss (id == (Ident "main"))
-  if (returns > 0)
+  if (returns > 0 || result == Void)
     then return (env, FnDef result id args (Block ss'))
     else Bad ("the function " ++ show id ++ " doesnt guarantee a return statement")
 
@@ -209,14 +209,14 @@ returns (Retting _ _) = 1
 -- Int return value: do these statements guarantee a return statement (0= no, 1+ = yes)?
 checkStms :: Env -> Type -> [Stmt] -> Bool -> Err (Env, [Stmt], Integer)
 -- base case void function, dont care about return statement existence
-checkStms e Void [] False = return (e, [], 1)
+checkStms e Void [] False = return (e, [], 0)
 -- base case
 checkStms e _ [] main = return (e, [], 0)
 -- general case void function, dont care about return statement existance
 checkStms e Void (s:ss) False = do
   (e', s') <- checkStm e Void s False
   (e'', ss', _) <- checkStms e' Void ss False
-  return (e'', s':ss', 1)
+  return (e'', s':ss', 0)
 -- general case
 checkStms env typ (s : ss) main = do
   (env' , s') <- checkStm env typ s main
@@ -288,23 +288,23 @@ checkStm env val x main = case x of
 
   Cond exp s -> do
     checkExp env Bool exp
-    let env'                   = newBlock env
+    let env' = newBlock env
     (_, s') <- checkStm env' val s main
-    exp'                      <- inferExp env exp
+    exp'    <- inferExp env exp
     if (exp == ELitTrue)
       then return (env, Retting (Cond exp' s') $ returns s')
       else return (env, Retting (Cond exp' s') 0)
 
   CondElse exp s1 s2 -> do
     checkExp env Bool exp
-    let env'                     = newBlock env
+    let env'  = newBlock env
     (_, s1') <- checkStm env' val s1 main
     (_, s2') <- checkStm env' val s2 main
-    exp'                        <- inferExp env exp
+    exp'     <- inferExp env exp
     case exp of
-      ELitTrue  -> return (env, Retting (CondElse exp' s1' s2') $ returns s1')
-      ELitFalse -> return (env, Retting (CondElse exp' s1' s2') $ returns s2')
-      _         -> return (env, Retting (CondElse exp' s1' s2') $  (returns s1') * (returns s2'))
+      ELitTrue  -> return (env, Retting (CondElse exp' s1' s2') $  returns s1')
+      ELitFalse -> return (env, Retting (CondElse exp' s1' s2') $  returns s2')
+      _         -> return (env, Retting (CondElse exp' s1' s2') $ (returns s1') * (returns s2'))
 
   Ass id exp -> do
     typ       <- lookupVar env id

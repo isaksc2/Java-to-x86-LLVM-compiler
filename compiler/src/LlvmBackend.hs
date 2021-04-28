@@ -463,7 +463,8 @@ compileFun (Ident f) t0 args ss = do
                                           emit $ Store (Lit t') (Reg r) (Ptr (Lit t')) r'
                                         ) arg_reg
   modify $ \st -> st { params = regs}
-  mapM_ compileStm ss
+  --mapM_ compileStm ss
+  compileStms ss
   -- add "ret void" if no return statement at the end
   if (t0 == Void)
     then do 
@@ -512,10 +513,19 @@ compileDecl t (NoInit id) = do
   emit $ Alloca r (Lit t)
 
 
+-- compile list of statements 
+compileStms :: [Stmt] -> Compile Bool
+compileStms [] = return False
+compileStms (s : ss') = do
+  returns <- compileStm s
+  -- stop if you found a statement that guaranteed a return statement
+  if (returns)
+    then return True
+    else compileStms ss'
 
 -- compile statement
-compileStm :: Stmt -> Compile ()
-compileStm (Retting s0 rets) = do
+compileStm :: Stmt -> Compile Bool
+compileStm (Retting s0 ret) = do
   --let top = stmTop s0
   --unless (null top) $ do
     --blank
@@ -526,66 +536,108 @@ compileStm (Retting s0 rets) = do
       r <- getPrevResult
       r' <- loadReg r
       emit $ Return (Lit t) r'
+      return True
+
     VRet -> do
       emit $ ReturnVoid ----------------------------------- rätt?
+      return True
 
     Decl t ds -> do
       mapM_ (compileDecl t) ds
+      return False
+
     SExp e@(ETyped _ t) -> do
       compileExp e False
       --emit $ Pop t
       -- removeArgs 1? -------------------------- todo
-    While e@(ETyped _ typ) s -> do
-      start <- newLabel
-      t     <- newLabel
-      f     <- newLabel
-      emit $ Branch start
-      emit $ Label start
-      --compileCond False l2 e
-      compileExp e False -------------  todo true? idk
-      r <- getPrevResult
-      r' <- loadReg r
-      emit $ BranchCond r' t f
-      emit $ Label t
-      inNewBlock $ compileStm s
-      emit $ Branch start
-      emit $ Label f
+      return False
+
+    While e@(ETyped e' typ) s -> do
+      -- if guaranteed return, only compile inner stmt
+      -- otherwise, do as usual
+      if (ret > 0)
+        then do 
+          inNewBlock $ compileStm s
+          return True
+        else do
+          start <- newLabel
+          t     <- newLabel
+          f     <- newLabel
+          emit $ Branch start
+          emit $ Label start
+          compileExp e False -------------  todo true? idk
+          r <- getPrevResult
+          r' <- loadReg r
+          emit $ BranchCond r' t f
+          emit $ Label t
+          inNewBlock $ compileStm s    ----------- todo break with innew?
+          emit $ Branch start
+          emit $ Label f
+          return False
+
+
     BStmt (Block ss) -> do
       inNewBlock $ compileStms ss
-     where
-      compileStms :: [Stmt] -> Compile ()
-      compileStms [] = return ()
-      compileStms (s : ss') = do
-        compileStm s
-        compileStms ss'
 
-    CondElse e@(ETyped _ typ) s1 s2 -> do
-      compileExp e False ------------------- todo maybe issue?
-      t   <- newLabel
-      f   <- newLabel
-      r <- getPrevResult
-      r' <- loadReg r
-      emit $ BranchCond r' t f
-      emit $ Label t
-      inNewBlock $ compileStm s1
-      end <- newLabel
-      emit $ Branch end
-      emit $ Label f
-      inNewBlock $ compileStm s2
-      emit $ Branch end
-      emit $ Label end
+    CondElse e@(ETyped e' typ) s1 s2 -> do
+      -- if return guaranteed, then only compile s1 or s2
+      if (ret > 0)
+        then case e' of
+          ELitTrue -> do
+            inNewBlock $ compileStm s1
+            return True
+          ELitFalse -> do
+            inNewBlock $ compileStm s2
+            return True
+          _ -> standard True
+        else standard False
+        where
+          standard b = do
+            compileExp e False ------------------- todo maybe issue?
+            t   <- newLabel
+            f   <- newLabel
+            r   <- getPrevResult
+            r'  <- loadReg r
+            emit $ BranchCond r' t f
+            emit $ Label t
+            inNewBlock $ compileStm s1
+            -- if doesnt guarantee return, then include end branch
+            if (not b)
+              then do 
+                end <- newLabel
+                emit $ Branch end
+                emit $ Label f
+                inNewBlock $ compileStm s2 -- todo, actually dont return false/ true here direcly, if you do then the end label wont exist
+                emit $ Branch end
+                emit $ Label end
+                return False
+              else do
+                -- todo emit mock ret?
+                emit $ Label f
+                inNewBlock $ compileStm s2 -- todo, actually dont return false/ true here direcly, if you do then the end label wont exist             
+                return True
 
+    --- todo, why not just check true / false?
+    -- we could, but then we would have to remove the True on line 616
     Cond e@(ETyped _ typ) s -> do
-      t   <- newLabel
-      f   <- newLabel
-      compileExp e False
-      r <- getPrevResult
-      r' <- loadReg r
-      emit $ BranchCond r' t f
-      emit $ Label t
-      inNewBlock $ compileStm s
-      emit $ Branch f
-      emit $ Label f
+
+      if (ret > 0) -- could also check if == littrue, NOOOOOO ish, you could but then you gotta remove the true below.
+        then do
+          inNewBlock $ compileStm s
+          return True -- so i guess this is obsolete if compilestm s returns true
+        else do
+          t  <- newLabel
+          f  <- newLabel
+          compileExp e False
+          r  <- getPrevResult
+          r' <- loadReg r
+          emit $ BranchCond r' t f
+          emit $ Label t
+          inNewBlock $ compileStm s
+          emit $ Branch f
+          emit $ Label f
+          return False
+
 
     Ass x e@(ETyped _ typ) -> do
       compileExp e False
@@ -593,8 +645,10 @@ compileStm (Retting s0 rets) = do
       r <- getPrevResult
       r' <- loadReg r
       emit $ Store (Lit typ) r' (Ptr (Lit typ)) a
+      return False
 
-    Empty -> return ()
+    Empty -> return False
+
     Incr i -> do
       (adr, t) <- lookupVar i
       adr''' <- loadReg (Reg adr, t)
@@ -604,9 +658,11 @@ compileStm (Retting s0 rets) = do
         then do
           emit $ Add adr' Plus (Lit Int) (Reg adr'') (LitInt 1)
           emit $ Store (Lit Int) (Reg adr') t $ adr ----- todo probably only need to supply 1 type to add / mul
+          return False
         else do
           emit $ Add adr' Plus (Lit Doub) (Reg adr'') (LitDoub 1.0)
           emit $ Store (Lit Doub) (Reg adr') t adr
+          return False
 
     Decr i -> do
       (adr, t) <- lookupVar i
@@ -617,9 +673,11 @@ compileStm (Retting s0 rets) = do
         then do
           emit $ Add adr' Minus (Lit Int) (Reg adr'') (LitInt 1)
           emit $ Store (Lit Int) (Reg adr') t adr
+          return False
         else do
           emit $ Add adr' Minus (Lit Doub) (Reg adr'') (LitDoub 1.0)
           emit $ Store (Lit Doub) (Reg adr') t adr
+          return False
 
     s -> error $ "not implemented compileStm " ++ printTree s
 

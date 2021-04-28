@@ -1,0 +1,9 @@
+I modified the javalette.cf and typechecker.hs from lab1 to "annotate" 
+statements with an int, telling you if it guarantees a return statement (1+)
+or not (0). In javalette.cf I added the constructor(?) "Retting Stmt Integer"
+and in Typechecker.hs I simply removed the Bool return value in checkStm
+and made sure to use the annotated statements instead. 
+
+The reason this change was necessary was to be able to "optimize" when 
+generating LLVM code; if a statements guarantees a return statement
+we can omit generating any of the subsequent code.
