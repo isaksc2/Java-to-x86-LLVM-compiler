@@ -189,7 +189,7 @@ checkFun :: Env -> TopDef -> Err (Env, TopDef)
 checkFun env (FnDef result id args (Block ss)) = do
   env' <- addArgs env args
   (_, ss', returns) <- checkStms env' result ss (id == (Ident "main"))
-  if (returns)
+  if (returns > 0)
     then return (env, FnDef result id args (Block ss'))
     else Bad ("the function " ++ show id ++ " doesnt guarantee a return statement")
 
@@ -197,25 +197,31 @@ checkFun env (FnDef result id args (Block ss)) = do
 
 -------------------------- Statements
 
+-- check if statements guarantees a return statement, 0 if no, 1+ otherwise
+returns :: Stmt -> Integer
+returns (Retting _ 0) = 0
+returns (Retting _ _) = 1
+--returns s             = Bad ("tried to check if non-typechecked statement" ++ show s ++  " guarantees a return")
+
 
 -- type check and annotate statements
 -- Bool argument, main: true if we are checking statements for the main function
--- Bool return value: do these statements guarantee a return statement?
-checkStms :: Env -> Type -> [Stmt] -> Bool -> Err (Env, [Stmt], Bool)
+-- Int return value: do these statements guarantee a return statement (0= no, 1+ = yes)?
+checkStms :: Env -> Type -> [Stmt] -> Bool -> Err (Env, [Stmt], Integer)
 -- base case void function, dont care about return statement existence
-checkStms e Void [] False = return (e, [], True)
+checkStms e Void [] False = return (e, [], 1)
 -- base case
-checkStms e _ [] main = return (e, [], False)
+checkStms e _ [] main = return (e, [], 0)
 -- general case void function, dont care about return statement existance
 checkStms e Void (s:ss) False = do
-  (e', s', _) <- checkStm e Void s False
+  (e', s') <- checkStm e Void s False
   (e'', ss', _) <- checkStms e' Void ss False
-  return (e'', s':ss', True)
+  return (e'', s':ss', 0)
 -- general case
 checkStms env typ (s : ss) main = do
-  (env' , s', s_returns) <- checkStm env typ s main
+  (env' , s') <- checkStm env typ s main
   (env'', ss', ss_returns) <- checkStms env' typ ss main
-  return (env'', s' : ss', s_returns || ss_returns)
+  return (env'', s' : ss', (returns s') + ss_returns)
 
 
 -- helper for checkStm, type check and annotate list of declarations
@@ -238,19 +244,19 @@ checkDecls e t [] = return (e, [])
 
 -- type check and annotate statement
 -- Bool argument: main, is this the main function?
--- Bool return value: does this statement guarantee a return statement?
-checkStm :: Env -> Type -> Stmt -> Bool -> Err (Env, Stmt, Bool)
+-- Int return value: does this statement guarantee a return statement (1/0)?
+checkStm :: Env -> Type -> Stmt -> Bool -> Err (Env, Stmt)
 checkStm env val x main = case x of
   SExp exp -> do
     exp' <- inferExp env exp
-    return (env, Retting (SExp exp') 0, False)
+    return (env, Retting (SExp exp') 0)
 
   Decl typ items -> do
     if (typ == String)
       then Bad "variable cant have type string"
       else do
         (env', items') <- checkDecls env typ items
-        return (env', Retting (Decl typ items') 0, False)
+        return (env', Retting (Decl typ items') 0)
 
   Ret exp -> do
     if (main && exp /= (ELitInt 0))
@@ -258,69 +264,69 @@ checkStm env val x main = case x of
       else do
         checkExp env val exp
         exp' <- inferExp env exp
-        return (env, Retting (Ret exp') 1, True)
+        return (env, Retting (Ret exp') 1)
 
   VRet -> do
     if (val == Void)
-      then return (env, Retting (VRet) 1, True)
+      then return (env, Retting (VRet) 1)
       else Bad ( "returns void but expected " ++ printTree val )
 
   While exp stm -> do
     checkExp env Bool exp
-    let env' = newBlock env
-    (_, stm', stm_returns) <- checkStm env' val stm main
-    exp'      <- inferExp env exp
+    let env'                      = newBlock env
+    (_, stm') <- checkStm env' val stm main
+    exp'                         <- inferExp env exp
     if (exp == ELitTrue)
-      then return (env, While exp' stm', stm_returns)
-      else return (env, While exp' stm', False)
+      then return (env, Retting (While exp' stm') $ returns stm')
+      else return (env, Retting (While exp' stm') 0)
     
 
   BStmt (Block ss) -> do
     let env' = newBlock env
     (_, ss', returns) <- checkStms env' val ss main
-    return (env, BStmt (Block ss'), returns)
+    return (env, Retting (BStmt (Block ss')) returns)
 
   Cond exp s -> do
     checkExp env Bool exp
-    let env' = newBlock env
-    (_, s', s_returns) <- checkStm env' val s main
-    exp'    <- inferExp env exp
+    let env'                   = newBlock env
+    (_, s') <- checkStm env' val s main
+    exp'                      <- inferExp env exp
     if (exp == ELitTrue)
-      then return (env, Cond exp' s', s_returns) 
-      else return (env, Cond exp' s', False)
+      then return (env, Retting (Cond exp' s') $ returns s')
+      else return (env, Retting (Cond exp' s') 0)
 
   CondElse exp s1 s2 -> do
     checkExp env Bool exp
-    let env' = newBlock env
-    (_, s1', s1_returns) <- checkStm env' val s1 main
-    (_, s2', s2_returns) <- checkStm env' val s2 main
-    exp'     <- inferExp env exp
+    let env'                     = newBlock env
+    (_, s1') <- checkStm env' val s1 main
+    (_, s2') <- checkStm env' val s2 main
+    exp'                        <- inferExp env exp
     case exp of
-      ELitTrue -> return (env, CondElse exp' s1' s2', s1_returns)
-      ELitFalse -> return (env, CondElse exp' s1' s2', s2_returns)
-      _ -> return (env, CondElse exp' s1' s2', s1_returns && s2_returns)
+      ELitTrue  -> return (env, Retting (CondElse exp' s1' s2') $ returns s1')
+      ELitFalse -> return (env, Retting (CondElse exp' s1' s2') $ returns s2')
+      _         -> return (env, Retting (CondElse exp' s1' s2') $  (returns s1') * (returns s2'))
 
   Ass id exp -> do
-    typ <- lookupVar env id
+    typ       <- lookupVar env id
     (e, typ2) <- inferExp env exp >>= unwrap
     if (typ == typ2)
-      then return (env , Ass id e, False )
+      then return (env , Retting (Ass id e) 0 )
       else Bad ( "variable " ++ show id ++ " has type " ++ printTree typ ++ ", cant assign expression of different type " ++ printTree typ2 )
     
   Incr id -> do
     typ <- lookupVar env id
     if (typ == Int || typ == Doub)
-      then return (env, x, False)
+      then return (env, Retting x 0)
       else
         Bad ( "type " ++ printTree typ ++ "of variable " ++ show id ++ " cant be incremented" )
 
   Decr id -> do
     typ <- lookupVar env id
     if (typ == Int || typ == Doub)
-      then return (env, x, False)
+      then return (env, Retting x 0)
       else  Bad ( "type " ++ printTree typ ++ "of variable " ++ show id ++ " cant be decremented" )
   
-  Empty -> return (env, x, False)
+  Empty -> return (env, Retting x 0)
 
 
 

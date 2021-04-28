@@ -515,7 +515,7 @@ compileDecl t (NoInit id) = do
 
 -- compile statement
 compileStm :: Stmt -> Compile ()
-compileStm s0 = do
+compileStm (Retting s0 rets) = do
   --let top = stmTop s0
   --unless (null top) $ do
     --blank
