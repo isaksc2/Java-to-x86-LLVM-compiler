@@ -235,6 +235,16 @@ newtype GlobalRegister = G Int
 data Value = LitInt Integer | LitDoub Double | LitBool Bool | LitString String | Reg Register | Glob GlobalRegister
   deriving(Show)
 
+
+
+newtype Index = I [Int]
+  deriving (Show)
+
+
+instance ToJVM Index where
+  toJVM (I (i:[])) = toJVM (Lit Int) ++ " " ++ show i
+  toJVM (I (i:is)) = toJVM (Lit Int) ++ " " ++ show i ++ ", " ++ toJVM (I is)
+
 data Code
   = Store LLVMType Value LLVMType Register
   | Load Register LLVMType LLVMType Register
@@ -262,6 +272,7 @@ data Code
   | Branch Label
   | BranchCond Value Label Label
   | Global GlobalRegister LLVMType Value
+  | GetElementPointer Register String GlobalRegister Index
   | Comment String
     deriving (Show)
 
@@ -346,6 +357,9 @@ instance ToJVM Arguments where
   toJVM (Args [(t, v)]) = toJVM t ++ " " ++ toJVM v
   toJVM (Args ((t, v):as)) = toJVM t ++ " " ++ toJVM v ++ ", " ++ toJVM (Args as)
 
+stringType :: String -> String
+stringType s = "[" ++ show ( (length s) + 1) ++ " x i8]"
+
 instance ToJVM Code where
   toJVM = \case
     Store t1 from t2 to                     -> "store " ++ toJVM t1 ++ " " ++  toJVM from ++ " , " ++ toJVM t2  ++ " " ++ toJVM to
@@ -390,8 +404,9 @@ instance ToJVM Code where
     --Assign adr c                          -> ToJVM adr ++ " = " ++ ToJVM c 
 
     Branch lb                               -> "br label %" ++ toJVM lb
-    BranchCond c lb1 lb2                  -> "br i1 " ++ toJVM c ++ ", label %" ++ toJVM lb1 ++ ", label %" ++ toJVM lb2 ----- todo remove t, has to be i1
-    Global adr t (LitString s)              -> toJVM adr ++ " = internal constant [" ++ show ( (length s) + 1) ++ " x i8] c\"" ++ s ++ "\\00\""
+    BranchCond c lb1 lb2                    -> "br i1 " ++ toJVM c ++ ", label %" ++ toJVM lb1 ++ ", label %" ++ toJVM lb2 ----- todo remove t, has to be i1
+    Global adr t (LitString s)              -> toJVM adr ++ " = internal constant " ++ stringType s ++  " c\"" ++ s ++ "\\00\""
+    GetElementPointer r' s r i              -> toJVM r' ++ " = getelementptr " ++ stringType s ++ ", " ++ stringType s ++ "* " ++ toJVM r ++ ", " ++ toJVM i
  
     --I2D                       -> "i2d"
 
@@ -402,7 +417,7 @@ instance ToJVM Code where
 -- compile function
 compileDef :: St -> TopDef -> (String, String, St)
 compileDef st def@(FnDef t (Ident f) args (Block ss)) = do
-  let args' = Args $ zip (map (\(Argument t id) -> Lit t) args) (map (\x -> Reg x) (params st'))
+  let args' = Args $ zip (map (\(Argument t id) -> (Lit t)) args) (map (\x -> Reg x) (params st')) -- kinda ugly to have have params here, just do it in compilefun todo
   let func = intercalate "" [ "define " ++ toJVM t ++ " @" ++ f ++ "(" ++ toJVM args' ++ " ) {\n", "entry:\n", unlines $ map (indent . toJVM) $ reverse $ (output st'), "}\n"]
   let glob = unlines $ map toJVM $ reverse (globalOut st')
   (func, glob, st')
@@ -440,7 +455,13 @@ compileFun (Ident f) t0 args ss = do
   modify $ \st -> st { globalOut = []}
   regs <- mapM (\(Argument t' x) -> newRegister) args
   let arg_reg = zip args regs
-  mapM_ (\(Argument t' x, r) -> newVar x r (Lit t')) arg_reg
+  -- make a new variable and alloc memory for each parameter:
+  mapM_ (\(Argument t' x, r) -> do
+                                          r' <- newRegister
+                                          newVar x r' (Ptr (Lit t'))
+                                          emit $ Alloca r' (Lit t')
+                                          emit $ Store (Lit t') (Reg r) (Ptr (Lit t')) r'
+                                        ) arg_reg
   modify $ \st -> st { params = regs}
   mapM_ compileStm ss
   -- add "ret void" if no return statement at the end
@@ -643,8 +664,10 @@ compileExp e0 b = case e0 of
   ELitDoub d -> setPrevVal (LitDoub d, Lit Doub) b
   EString s  -> do
     adr <- newGlobalRegister
-    emitGlobal $ Global adr (Lit String) (LitString s) 
-    setPrevVal (Glob adr, Lit String) b
+    emitGlobal $ Global adr (Lit String) (LitString s)
+    adr' <- newRegister
+    emit $ GetElementPointer adr' s adr $ I [0, 0]
+    setPrevVal (Reg adr', Lit String) b
 
 {-
   ETyped (ELitInt i) Doub -> do

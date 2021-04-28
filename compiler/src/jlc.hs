@@ -53,6 +53,8 @@ main = do
   --check "int main() {p();printInt(1);return 0;}void p() {}"
   --check "int main() {int x;x = 5;while (x > 0) {printInt(x);x--;}printInt(x);return 0;}"
   --check "/* Test arithmetic and comparisons. */int main() {    int x = 56;    int y = 1+2+3+42+23;    printInt(x+y);    printInt(x-y);    printInt(x*y);    printInt(45/2);    printInt(78%3);    double z = -9.3;    double w = 5.1;    printBool(z+w > z-w);    printBool(z/w <= z*w);    return 0 ;}void printBool(boolean b) {  if (b) {    printString(\"true\");return;} else {printString(\"false\");return;}}"
-  check "int f () {}int g () {if (false) {}else return 0;}void p () {}int main() { return 0;}"
+  --check "int f () {}int g () {if (false) {}else return 0;}void p () {}int main() { return 0;}"
   --check "int main() {return 0;}"
-  --check program
+  --check "int foo(int n) {if (n < 100) {n = foo(foo(n + 11));}return n;}int main() {printInt(foo(1));return 0;}"
+  --"int main() {printInt(fac(5));return 0 ;}int fac (int a) {int r;int n;r = 1;n = a;while (n > 0){r = r * n;n = n - 1;}  return r;}"
+  check program
