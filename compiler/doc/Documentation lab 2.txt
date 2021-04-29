@@ -1,9 +1,71 @@
+-- Changes in lab 1 files:
 I modified the javalette.cf and typechecker.hs from lab1 to "annotate" 
 statements with an int, telling you if it guarantees a return statement (1+)
 or not (0). In javalette.cf I added the constructor(?) "Retting Stmt Integer"
 and in Typechecker.hs I simply removed the Bool return value in checkStm
-and made sure to use the annotated statements instead. 
+and made sure to use the annotated statements instead. The reason I use 
+ints intead of bools to annotate is that bnfc doesnt really support bools.
 
 The reason this change was necessary was to be able to "optimize" when 
 generating LLVM code; if a statements guarantees a return statement
 we can omit generating any of the subsequent code.
+
+I also updates the "wrapper" jlc.hs. Before it would only typecheck using
+the check function, but now it also calls the llvm function that compiles
+the syntax tree into llvm code
+
+-- Lab 2 file structure
+LlvmBackend.hs compiles the llvm code. it has 6 main sections: 
+entry point
+types + state
+functions for interacting with the state
+functions for converting code to "llvm strings"
+functions for saving (emitting) code to the state
+functions for compiling functions
+functions for compiling statements
+functions for compiling expressions
+
+-- entry point:
+the compile function compiles all functions, it appends imports, 
+strings constants and the functions themselves
+
+-- types + state:
+we use a state monad that containts variable / register enums, 
+compiled code and function / variable signatures.
+We also have a "Code" data type that contains all relevant llvm 
+instruction templates.
+
+-- functions for interacting with the state:
+we have methods for getting / fetching the "previous value". This lets use
+use the result from an instruction in the next one. We also have functions for 
+adding / getting variables, registers and labels.
+
+-- functions for converting code to "llvm strings":
+these functions convert our "llvm instruction templates" to strings
+
+-- functions for saving (emitting) code to the state:
+these functions take a llvm instruction template, turns it into a string and 
+puts it in the state.
+
+-- functions for compiling functions:
+given a function, we compile its header and its statements.
+I'm a little unsatisfied with the use of "params" in the state and the
+helper function compileFun. Ideally you would merge compileFun and 
+compileDef to avoid needing the "params" variable in the state.
+The reason why it is this way is because I couldnt figure out how to
+perform execState / runState in such a way that I could return params
+from compileFun.
+
+-- functions for compiling statements:
+given a statement, we compile it by emitting llvm instructions directly or 
+by calling the compileExp function. The compileStm function returns a bool
+that tells us if the statement guarantees a return. If it does, then we can
+omit the following statements, as mentioned before.
+
+-- functions for compiling expressions:
+The compileExp function compiles expressions to llvm code. The function takes
+a bool argument that tells us if the expression is used as an operand or 
+argument for a different expression. If so, then we make sure that it is 
+not overridden by subsequent "arguments" by passing this bool to the
+setPrevVal function. This makes it so that we append the argument to the end
+of the list, rather than ovverriding the last element.

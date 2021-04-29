@@ -52,5 +52,6 @@ distclean : clean
 	-rmdir -p Javalette/
 	-rm -f lab1.tar.gz lab2
 	-rm jlc
+	-rm main.ll
 
 # EOF
