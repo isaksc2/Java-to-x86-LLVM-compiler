@@ -13,8 +13,8 @@ import Javalette.ErrM           (pattern Ok, pattern Bad)
 import Javalette.Abs
 
 import TypeChecker
-import LlvmBackend
---import Interpreter
+--import LlvmBackend
+import X86Backend
 
 main :: IO ExitCode
 main = do
@@ -42,6 +42,7 @@ check s = do
 llvm :: Prog -> IO ExitCode
 llvm p = do
   let code = compile p
-  writeFile "main.ll" code -- file for debugging
+  --writeFile "main.ll" code -- file for debugging
+  writeFile "assembly.asm" code -- file for debugging
   putStrLn code
   exitSuccess
