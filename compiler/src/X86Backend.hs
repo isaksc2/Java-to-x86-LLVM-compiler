@@ -82,6 +82,9 @@ newtype GlobalRegister = G Int
 newtype Index = I [Int]
   deriving (Show)
 
+newtype Arguments = Args [(LLVMType, Value)]
+  deriving(Show, Eq)
+
 
 ---------------------- data
 
@@ -149,33 +152,41 @@ data Operator = Mo MulOp | Ao AddOp | Ro RelOp
   deriving(Show)
 
 -- built in registers
-data X86Reg = RAX | RDI | RSI | RSP | XMM0
+data X86Reg
+  = Stack Int
+  | RBP | RSP | RIP | RDI | RSI | RAX | RCX | RDX | RBX | R8 | R9 | R10 | R11 | R12 | R13 | R14 | R15
+  | XMM0 | XMM1 | XMM2 | XMM3 | XMM4 | XMM5 | XMM6 | XMM7 | XMM8 | XMM9 | XMM10 | XMM11 | XMM12 | XMM13 | XMM15 
   deriving(Show, Eq)
 
 -- jump flags
-data JumpOp = EE | NEE | ZZ | GG | GEE | LL | LEE
+data JumpOp = EE | NEE | ZZ | GG | GEE | LL | LEE -- dont need ig, just delete
   deriving(Show, Eq)
 
 
 data Code
-  = Store LLVMType Value Register
-  | Load Register LLVMType Register
-  | Return
-  | ReturnVoid
-  | Call Register LLVMType Ident Arguments
-  | CallVoid LLVMType Ident Arguments
+  = 
+    -- Store LLVMType Value Register -- rodo remove comments
+  -- | Load Register LLVMType Register
+  Return
+  -- | ReturnVoid
+  | Call LLVMType Ident
+  -- | CallVoid LLVMType Ident Arguments
   | Label Label
   | Add AddOp LLVMType Value Value
-  | Mul Register MulOp LLVMType Value Value
-  | Compare Register RelOp LLVMType Value Value
+  | Mul MulOp LLVMType Value Value
+  -- | Compare Register RelOp LLVMType Value Value
   | Cmp LLVMType Value Value
-  | Alloca Register LLVMType
+  -- | Alloca Register LLVMType
   | Branch Label
-  | BranchCond JumpOp Label Label
+  | BranchCond RelOp Label Label
   | Global GlobalRegister LLVMType Value
-  | GetElementPointer Register String GlobalRegister Index
+  -- | GetElementPointer Register String GlobalRegister Index
   | Comment String
   | Mov LLVMType Value Value -- todo RAX | ESP + 8         intermediate: kan vara (X86 RAX) eller (R 5)
+  | Pop LLVMType Value
+  | Push LLVMType Value
+  | IncDec AddOp Value -- todo can only be reg ig
+  | CNeg Value
     deriving (Show, Eq)
 
 
@@ -203,6 +214,7 @@ getPrevResult = do
   return $ head allArgs
 
 
+{-
 -- load register (if it's variable, then load)
 loadReg :: (Value, LLVMType) -> Compile Value ---------- todo, var = reg ptr, temp = reg lit
 loadReg (Reg r, Ptr (Lit t)) = do 
@@ -210,7 +222,7 @@ loadReg (Reg r, Ptr (Lit t)) = do
   emit $ Load r' (Lit t) r
   return (Reg r')
 loadReg (r, Lit t) = return r
-
+-}
 
 -- remove arguments / previous results
 removeArgs :: Int -> Compile()
@@ -383,9 +395,6 @@ instance ToLLVM Register where
 instance ToLLVM GlobalRegister where
   toLLVM (G g) = "@g" ++ show g
 
-newtype Arguments = Args [(LLVMType, Value)]
-  deriving(Show)
-
 instance ToLLVM Arguments where
   toLLVM (Args [])          = ""
   toLLVM (Args [(t, v)])    = toLLVM t ++ " " ++ toLLVM v
@@ -397,26 +406,26 @@ stringType s = "[" ++ show ( (length s) + 1) ++ " x i8]"
 
 instance ToLLVM Code where
   toLLVM = \case
-    Store t from to                        -> "store " ++ toLLVM t ++ " "  ++ toLLVM from ++ " , " ++ toLLVM (Ptr t) ++ " " ++ toLLVM to
-    Load adr t reg                         -> toLLVM adr ++ " = load "     ++ toLLVM t    ++ " , " ++ toLLVM (Ptr t) ++ " " ++ toLLVM reg
-    Return t v                             -> "ret "   ++ toLLVM t ++ " "  ++ toLLVM v
-    ReturnVoid                             -> "ret void"
-    Call adr t (Ident f) args              -> toLLVM adr ++ " = call " ++ toLLVM t ++ " @" ++ f ++ "(" ++ toLLVM args ++ ")"
-    CallVoid t (Ident f) args              -> "call " ++ toLLVM t ++ " @" ++ f ++ "(" ++ toLLVM args ++ ")"
+   -- Store t from to                        -> "store " ++ toLLVM t ++ " "  ++ toLLVM from ++ " , " ++ toLLVM (Ptr t) ++ " " ++ toLLVM to
+    -- Load adr t reg                         -> toLLVM adr ++ " = load "     ++ toLLVM t    ++ " , " ++ toLLVM (Ptr t) ++ " " ++ toLLVM reg
+    Return                           -> "ret"  -- ++ toLLVM t ++ " "  ++ toLLVM v
+   -- ReturnVoid                             -> "ret void"
+    Call t (Ident f) args              -> "call " ++ toLLVM t ++ " @" ++ f ++ "(" ++ toLLVM args ++ ")"
+    -- CallVoid t (Ident f) args              -> "call " ++ toLLVM t ++ " @" ++ f ++ "(" ++ toLLVM args ++ ")"
     Label l                                -> toLLVM l ++ ":"
-    Compare adr op t v1 v2 | t == Lit Doub -> toLLVM adr ++ " = fcmp "   ++ prefixRelOp t op ++ " " ++ toLLVM t ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
-                           | otherwise     -> toLLVM adr ++ " = icmp "   ++ prefixRelOp t op ++ " " ++ toLLVM t ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
-    Add adr op t v1 v2 | t == Lit Int      -> toLLVM adr ++ " = "        ++ toLLVM op        ++ " " ++ toLLVM t ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
-                       | t == Lit Doub     -> toLLVM adr ++ " = " ++ "f" ++ toLLVM op        ++ " " ++ toLLVM t ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
-    Mul adr op t v1 v2                     -> toLLVM adr ++ " = " ++ (prefixMulOp t op)      ++ " " ++ toLLVM t ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
-    Alloca adr t                           -> toLLVM adr ++ " = alloca " ++ toLLVM t
+    -- Compare adr op t v1 v2 | t == Lit Doub -> toLLVM adr ++ " = fcmp "   ++ prefixRelOp t op ++ " " ++ toLLVM t ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
+   --                        | otherwise     -> toLLVM adr ++ " = icmp "   ++ prefixRelOp t op ++ " " ++ toLLVM t ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
+    Add op t v1 v2 | t == Lit Int      -> toLLVM op        ++ " " ++ toLLVM t ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
+                   | t == Lit Doub     -> "f" ++ toLLVM op        ++ " " ++ toLLVM t ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
+    Mul op t v1 v2                     -> (prefixMulOp t op)      ++ " " ++ toLLVM t ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
+    -- Alloca adr t                           -> toLLVM adr ++ " = alloca " ++ toLLVM t
     Branch lb                              -> "br label %" ++ toLLVM lb
     BranchCond c lb1 lb2                   -> "br i1 " ++ toLLVM c ++ ", label %" ++ toLLVM lb1 ++ ", label %" ++ toLLVM lb2
     Global adr t (LitString s)             -> toLLVM adr ++ " = internal constant " ++ stringType s ++  " c\"" ++ s ++ "\\00\""
-    GetElementPointer r' s r i             -> toLLVM r' ++ " = getelementptr " ++ stringType s ++ ", " ++ stringType s ++ "* " ++ toLLVM r ++ ", " ++ toLLVM i
+   -- GetElementPointer r' s r i             -> toLLVM r' ++ " = getelementptr " ++ stringType s ++ ", " ++ stringType s ++ "* " ++ toLLVM r ++ ", " ++ toLLVM i
     Comment ""                             -> ""
     Comment s                              -> "; " ++ s
-
+-- todo fix align
 
 
 
@@ -431,8 +440,8 @@ instance ToLLVM Code where
 
 -- add llvm code line to output
 emit :: Code -> Compile ()
-emit (Store (Lit Void) _ _) = return ()
-emit (Load  _ (Lit Void) _) = return ()
+-- emit (Store (Lit Void) _ _) = return ()
+-- emit (Load  _ (Lit Void) _) = return ()
 emit c                      = modify $ \st@St { output = cs } -> st { output = c : cs }
 
 -- add global constant string to output
@@ -454,7 +463,105 @@ blank = comment ""
 
 
 
+
+----------------------------------------------------- helpers for bool-list operations
+
+-- create bit array with length n
+bitArray :: Int -> [Bool]
+bitArray n = take n (repeat False)
+
+
+replaceNth :: Int -> a -> [a] -> [a]
+replaceNth _ _ [] = []
+replaceNth n newVal (x:xs)
+  | n == 0 = newVal:xs
+  | otherwise = x:replaceNth (n-1) newVal xs
+
+-- bitwise and
+bitAnd :: [Bool] -> [Bool] -> [Bool]
+bitAnd a b = (\(c,d) -> c && d) (zip a b)
+
+-- bitwise or
+bitOr :: [Bool] -> [Bool] -> [Bool]
+bitOr a b = (\(c,d) -> c || d) (zip a b)
+
+-- bitwise xor
+bitXor :: [Bool] -> [Bool] -> [Bool]
+bitXor a b = (\(c,d) -> (c && not d) || (d && not c)) (zip a b)
+
+-- bitwise complement
+bitMinus :: [Bool] -> [Bool] -> [Bool]
+bitMinus a b = (\(c,d) -> (c && not d)) (zip a b)
+
+-- count nbr of True
+boolSum :: [Bool] -> Int
+boolSum ds = sum (map (\x -> if (x)
+                              then 1
+                              else 0) ds)
+
+
+-- get element in list
+getElem :: Int -> [a] -> a 
+getElem i l = last $ take (i+1) l
+
+
+
+
+
+
+
 ---------------------------------------------------------------------------------- Register allocation optimization
+
+
+
+
+
+
+
+-- "main" function for register allocation optimization
+registerAlloc :: Compile ()
+registerAlloc = do
+  -- get def, use and succ sets
+  (d, iu, du, s) <- defUseSucc
+  -- calculate liveness
+  li             <- liveness (d, iu, s)
+  ld             <- liveness (d, du, s)
+  -- get interference graph
+  ii             <- interference li
+  id             <- interference ld
+  -- real registers
+  let iRegs       = [RCX, RDX, RBX, RDI, RSI, R8, R9, R10, R11, R12, R13, R14, R15]
+  let dRegs       = [XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7, XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM15]
+  -- nbr of real-regs
+  let ki          = length iRegs
+  let kd          = length dRegs
+  -- k color to get real-reg and stack-var partitions + color for each real-reg
+  (ri, si, ci)   <- kColor ii ki
+  (rd, sd, cd)   <- kColor id kd
+  -- update code with real-regs
+  registerOutput iRegs ri ci
+  registerOutput dRegs rd cd
+  -- space needed for spilled stack variables 
+  let  intLocals  = 4*(length si)
+  let doubLocals  = 8*(length sd)
+  -- local var locations
+  let iStack      = map (\(_, y) -> Stack y*4) (zip si [1..]) -- todo fix offset
+  let dStack      = map (\(_, y) -> Stack (y*8 + intLocals)) (zip sd [1..]) -- todo fix offset
+  -- which stack-location each spill register maps to
+  let sli         = map (\(_, i) -> replaceNth i True (bitArray ki)) (zip si [0..])
+  let sld         = map (\(_, i) -> replaceNth i True (bitArray kd)) (zip sd [0..])
+  -- update code with stack registers for spilled vars
+  registerOutput iStack si sli
+  registerOutput dStack sd sld
+  -- decrement RSP to make space for stack variables
+  o             <- gets output
+  let (o1, o2)   = splitAt 2 o
+  let code       = (Add Minus (Lit Int) (X86 RSP) (LitInt (toInteger $ intLocals + doubLocals)))
+  modify $ \st -> st { output = o1++(code:o2)}
+
+
+
+
 
 -- get a tuple with lists where element n is the def, use and succ set for the nth instruction
 defUseSucc :: Compile ([[Bool]], [[Bool]], [[Bool]], [[Bool]])
@@ -465,140 +572,118 @@ defUseSucc = do
   defs'                  <- defs
   uses                   <- mapM use  (reverse o)
   let (intUses, doubUses) = unzip uses
-  succs                  <- mapM succ (reverse o)
+  succs                  <- mapM succSet (reverse o)
   --return zip3 defs' uses succs
   return (defs', intUses, doubUses, succs)
 
--- helper: call def set calculator for every line of code
-defs :: -> Compile ([[Bool]])
-defs = do
-  o         <- gets output
-  n_reg     <- gets nextReg
-  let deffed = (bitArray n_reg)
-  return reverse $ mapp deffed o
   where
-    mapp :: [Bool] -> [Code] -> [[Bool]]
-    mapp deffed' []       = return []
-    mapp deffed' (o':os') = do
-      (d, deffed'')      <- def deffed' o'
-      ds                 <- mapp deffed'' os'
-      return (d:ds)
+    -- helper: call def set calculator for every line of code
+    defs :: Compile [[Bool]]
+    defs = do
+      o         <- gets output
+      (R n_reg) <- gets nextReg
+      let deffed = (bitArray n_reg)
+      return reverse $ defSets deffed o
+      where
+        -- get all def sets
+        defSets :: [Bool] -> [Code] -> [[Bool]]
+        defSets deffed' []       = return []
+        defSets deffed' (o':os') = do
+          (d, deffed'')      <- def deffed' o'
+          ds                 <- defSets deffed'' os'
+          return (d:ds)
+          where
+            -- get def set for a line of code
+            def :: [Bool] -> Code -> Compile ([Bool], [Bool])
+            def deffed (Mov _ _ r) = defV r
+            -------------------------------------------------------------
+              where
+                -- get def set for a value (for register its the index, nothing for any other value)
+                defV :: Value -> Compile ([Bool], [Bool])
+                defV (Reg r) = do 
+                  (R n_reg)     <- gets nextReg
+                  let thisReg    = replaceNth (theRegister r) True (bitArray n_reg)
+                  let thisReg'   = map (\(a,b) -> ((not a) && b)) (zip deffed thisReg)
+                  -- update 
+                  let deffed'    = map (\(a,b) -> a || b)         (zip deffed thisReg')
+                  return (thisReg', deffed')
+                defV _       = do
+                  (R n_reg)     <- gets nextReg
+                  ((bitArray n_reg), deffed)
+            ---------------------------------------------------------------
+            -- only mov-instructions can introduce new variables
+            def deffed v     = do
+              (R n_reg)         <- gets nextReg
+              ((bitArray n_reg), deffed)
 
--- get def set for a line of code
-def :: [Bool] -> Code -> Compile ([Bool], [Bool])
-def deffed (Mov _ r) = defV r
-def deffed v         = ((bitArray n_reg), deffed)
-where
-  defV (Reg r) = do 
-    let thisReg    = setBit r (bitArray n_reg)
-    let thisReg'   = map (\(a,b) -> ((not a) && b)) (zip deffed this )
-    -- update 
-    let deffed' = map (\(a,b) -> a || b)         (zip deffed thisReg')
-    return (thisReg', deffed')
-  defV _       = ((bitArray n_reg), deffed)
-where
-  n_reg <- gets nextReg
+    
+    -- get succ set for a line of code
+    succSet :: Code -> Compile [Bool]
+    succSet (Branch l)           = succL l -- todo first label was f:, and is defined outside this scope, do i need to care about he first one? u cant jump to it
+    succSet (BranchCond _ l1 l2) = bitOr (succL l1) (succL l2)
+    succSet _                    = bitArray $ length >>= (gets output) -- todo: need to add 1 extra elem for f:? no cause its not in output ig?
 
-
--- get succ set for a line of code
-succ :: Code -> Compile [Bool]
-o <- gets output
-let n_lines = length o
-succ (Branch l)           = succL l -- todo first label was f:, and is defined outside this scope, do i need to care about he first one? u cant jump to it
-succ (BranchCond _ l1 l2) = bitOr (succL l1) (succL l2)
-succ _                    = bitArray n_labels -- todo: need to add 1 extra elem for f:?
-where
-  -- get successors of 1 label
-  succL :: Label -> [Bool]
-  succL l' = setBit (labelLine l') (bitArray n_lines)
-  where
-    -- get the line that label is on
-    labelLine :: Label -> Int
-    labelLine l'' = do
-      return fromJust $ elemIndex (Label l'') o
-
-
--- get use set for a line of code, first set is ints, the second is doubles
-use :: Code -> Compile ([Bool], [Bool])
-use (Mov   v1 v2) = bitOr (useV v1) (useV v2)
-use (Cmp _ v1 v2) = bitOr (useV v1) (useV v2)
-use (Pop _     v) = useV v
--- todo implement the rest
-where
-  -- get the use set of a value
-  useV (Reg r) = setBit r (bitArray n_reg)
-  useV _       =          (bitArray n_reg)
-  where
-    n_reg <- gets nextReg
-  -- put result in the correct partition depending on type
-  partitionType :: LLVMType -> [Bool] -> ([Bool], [Bool])
-  partitionType (Lit Doub) b =    (take (length b) (repeat False), b)
-  partitionType _          b = (b, take (length b) (repeat False))
+    -- get successors of 1 label
+    succL :: Label -> [Bool]
+    succL l' = replaceNth True (labelLine l') (bitArray $ length >>= (gets output))
+      where
+        -- get the line that label is on
+        labelLine :: Label -> Compile Int
+        labelLine l'' = do
+          return fromJust $ elemIndex (Label l'') >>= gets output
 
 
+    -- get use set for a line of code, first set is ints, the second is doubles
+    use :: Code -> Compile ([Bool], [Bool])
+    use (Mov t   v1 v2) = partitionType t (bitOr (useV v1) (useV v2))
+    use (Cmp t v1 v2) = partitionType t (bitOr (useV v1) (useV v2)) -- todo implement the other types
+    use (Pop t       v) = useV v
 
-
--- create bit array with length n
-bitArray :: Int -> [Bool]
-bitArray n = do
-  let r = take n (repeat False)
-
--- set the nth bit to true of bit array
-setBit :: Int -> [Bool] -> [Bool]
-setBit n l = do
-  let (a,b) = splitAt n l
-  return (a ++ (True:(tail b)))
-
--- bitwise and
-bitAnd :: [Bool] -> [Bool] -> [Bool]
-bitArray a b = (\(c,d) -> c && d) (zip a b)
-
--- bitwise or
-bitOr :: [Bool] -> [Bool] -> [Bool]
-bitArray a b = (\(c,d) -> c || d) (zip a b)
-
--- bitwise xor
-bitXor :: [Bool] -> [Bool] -> [Bool]
-bitArray a b = (\(c,d) -> (c && not d) || (d && not c)) (zip a b)
-
--- bitwise complement
-bitMinus :: [Bool] -> [Bool] -> [Bool]
-bitArray a b = (\(c,d) -> (c && not d)) (zip a b)
+    -- get the use set of a value
+    useV :: Value -> [Bool]
+    useV (Reg r) = replaceNth r True (bitArray >>= gets nextReg)
+    useV _       =                    (bitArray >>= gets nextReg)
+    -- put result in the correct partition depending on type
+    partitionType :: LLVMType -> [Bool] -> ([Bool], [Bool])
+    partitionType (Lit Doub) b =    (take (length b) (repeat False), b)
+    partitionType _          b = (b, take (length b) (repeat False))
 
 
 
---
 
 
 -- create a list with the liveness of each virtual register in the current function
 -- element n corresponds to n:th instruction, each element is a list of live registers
 -- todo make sure u do from backwards to top
-liveness :: Compile [[Bool]]
-liveness = do
-dus <- defUseSucc
-let n_ins = length =<< (gets output) 
-n_regs <- gets nextReg
--- 1 list for each code line, each list has 1 bool for each reg
-let livein = take n_ins (repeat (take n_regs (repeat False)))
-iterate dus livein
-where -- todo should take [[Bool]]
-  -- iterate until livein doesnt change
-  iterate :: ([Bool], [Bool], [Bool]) -> [[Bool]]
-  iterate (defs, uses, succs) livein' = do -- (d, u, s):ds)
-    --let out = liveSucc s livein'
-    let out = map (\s' -> liveSucc s' livein') succs
-    livein'' = bitOr uses (bitMinus out defs)
-    if (livein' == livein'')
-      then return livein''
-      else return iterate (defs, uses, succs) livein''
-    where
-      -- get livein of successors
-      liveSucc :: [Bool] -> [[Bool]] -> [Bool]
-      liveSucc (s:ss) (l:ls) = do
-        let l'  = if (s)
-                    then l 
-                    else take (length l) (repeat False)
-        return bitOr l' (liveSucc ss ls)
+liveness :: ([[Bool]], [[Bool]], [[Bool]]) -> Compile [[Bool]]
+liveness dus = do
+  let n_ins = length (=<< (gets output) )
+  n_regs   <- gets nextReg
+  -- 1 list for each code line, each list has 1 bool for each reg
+  let livein = take n_ins (repeat (take (fromIntegral n_regs) (repeat False)))
+  return $ iterate dus livein
+  where -- todo should take [[Bool]]
+    -- iterate until livein doesnt change
+    iterate :: ([[Bool]], [[Bool]], [[Bool]]) -> [[Bool]] -> [[Bool]]
+    iterate (defs, uses, succs) livein' = do -- (d, u, s):ds)
+      -- out set for every line
+      let out       = map (\s' -> liveSucc s' livein') succs
+      -- successors "-" def set
+      let s_minus_d = map (\(o, d) -> bitMinus o d) (zip out defs)
+      -- livein for this iteration
+      let livein''  = map (\(u, smd) -> bitOr u smd) (zip uses s_minus_d)
+      -- repeat if not done
+      if (livein' == livein'')
+        then return livein''
+        else return iterate (defs, uses, succs) livein''
+      where
+        -- get livein of successors
+        liveSucc :: [Bool] -> [[Bool]] -> [Bool]
+        liveSucc (s:ss) (l:ls) = do
+          let l'  = if (s)
+                      then l 
+                      else take (length l) (repeat False)
+          return bitOr l' (liveSucc ss ls)
 
 
 -- do something with output
@@ -612,33 +697,180 @@ interference livein = do
   -- combine all edges
   let matrix = foldl1 (zipWith $ zipWith (||)) matrices
   return matrix
-  --let empty = (repeat (take n_regs (repeat False)))
-  --foldr (\a b -> map (\ a' b' -> bitOr a' b') (zip a b)) empty matrices
-where
-  -- calculate interference on one line
-  lineInterference :: [Bool] -> [[Bool]]
-  lineInterference l' = do
-    n_regs <- gets nextReg
-    -- if register e is live, then add edge tp all the other live ones 
-    -- make a list for each variable, an adjacency matrix
-    map (\(e, i) -> if e
-                      then (bitMinus l' ( setBit i (bitArray n_regs))) (zip l' [0..]) -- inlcude index 0..
-                      else bitArray n_regs) l'
+  where
+    -- calculate interference on one line
+    lineInterference :: [Bool] -> [[Bool]]
+    lineInterference l' = do
+      n_regs <- gets nextReg
+      -- if register e is live, then add edge to all the other live ones 
+      -- make a list for each variable, an adjacency matrix
+      map (\(e, i) -> if e
+                        then (bitMinus l' ( replaceNth i True (bitArray n_regs))) (zip l' [0..]) -- inlcude index 0..
+                        else bitArray n_regs) l'
 
 
--- create a partition of real registers and a set of spill registers
-partition :: [[Bool]] -> Compile ([Int], [Int])
-partition matrix = do
-  -- k is different for double and int
-  -- double can only go in xmm0? xmm1-15
-  -- 1 liveness + tree for int and 1 for double?
-  let k = 
-  h
+-- k-color the registers,
+-- returns registers to be allocates, spills and the coloring
+kColor :: [[Bool]] -> Int -> Compile ([Int], [Int], [[Bool]])
+kColor matrix k = do
+  let n_regs            = length matrix
+  let stack             = repeatAlg matrix n_regs
+  let (stack', matrix', spill) = removeSpill stack matrix
+  -- an empty k-bit-map representation of color choice for each register
+  let colors            = take n_regs (repeat (take k (repeat False)))
+  let coloring          = color stack' matrix' colors
+  return (stack', spill, coloring)
+  where
+    -- color nodes in stack
+    color :: [Int] -> [[Bool]] -> [[Bool]] -> [[Bool]]
+    color []     matrix' colors' = colors'
+    color (s:ss) matrix' colors' = do
+      let neighbours = getElem s matrix'
+      let nc         = zip neighbours colors'
+      -- get the color of each neighbour
+      let cs         = map (\(i, c) -> do 
+                                        if (i)
+                                          then c
+                                          else take k (repeat False)) nc
+      -- combine the color of each neighbour
+      let taken_colors = foldl1 (zipWith (||)) cs
+      -- take avialable color
+      let this_color   = availableColor taken_colors
+      let colors''     = replaceNth s this_color colors'
+      -- choose colors for the rest of the stack
+      return color ss colors''
+      where
+        -- get the color thats not taken todo (should not be able to fail since we removed all spill)
+        availableColor :: [Bool] -> [Bool]
+        availableColor (c':cc') = do
+          -- if color taken then try the next one, else take this color
+          if (c')
+            then return (False:(availableColor cc'))
+            else return (True:(take (length cc') (repeat False)))
+
+
+    -- remove spill nodes and their edges, place the spill nodes in a new stack
+    removeSpill :: [(Int, Bool)] -> [[Bool]] -> ([Int], [[Bool]], [Int])
+    removeSpill []              m = ([], m, [])
+    removeSpill ((s, False):ss) m = do 
+      -- keep non spill node in stack
+      let       (ss', m', spill)  = removeSpill ss m
+      return ((s:ss', m', spill))
+    removeSpill ((s, True) :ss) m = do 
+      -- remove spill node from the first stack and put it in the spill stack
+      let m'                      = deleteNode s m
+      let    (ss', m'',   spill)  = removeSpill ss m'
+      return (ss', m'', s:spill)
+
+      
+
+    -- find node and delete it until k nodes left or fal
+    -- arguemtns are the graph, nbr of remaining nodes and the node stack
+    repeatAlg :: [[Bool]] -> Int -> [(Int, Bool)]
+    repeatAlg m r = do
+      if (r == 0) -- todo <= k
+        then return []
+        else do
+          let (m', n, _) = findN m (-1)
+          let r' = r - 1
+          let stack' = repeatAlg m' r'
+          return (n:stack')
+    -- find node n with <k egdges, also delete edges
+    -- spill node with most interference
+    -- int argument is the max degree discovered
+    -- result: 
+    -- graph with deleted edges, 
+    -- the edge with a spill flag and 
+    -- degree of node we need to spill
+    findN :: [[Bool]] -> Int -> ([[Bool]], (Int, Bool), Maybe Int)
+    findN []     degree = ([], (-1, False), Just degree)
+    findN (b:bs) degree = do
+      let degree' = boolSum b
+      let index   = (length matrix) - (length bs) - 1
+      -- if degree' < k, delete this node, otherwise check the next node
+      if (degree' < k)
+        then do
+          let matrix'' = deleteNode index matrix
+          return Just (matrix'', (index, False), Nothing)
+        else do 
+          -- update max degree (for spill prioritization)
+          let degree'' = if (degree' >= degree)
+                          then degree'
+                          else degree
+          -- try delete other node
+          let (matrix''', (b', flag), degree''') = findN bs degree''
+          -- if we deleted, then return, else see if we should spill the current node
+          if (isNothing degree''') -- todo maybe entire result use when?
+            then return (matrix''', (b', flag), degree''')
+            else do
+              -- if this node had the highest degree, then spill this, otherwise ask previous node to spill
+              if (fromJust degree''' == degree')
+                then do
+                  let matrix'''' = deleteNode index matrix
+                  return (matrix'''', (index, True), Nothing)
+                -- ask previous node to spill
+                -- dont actually care about any value other than degre''' in this case
+                else return (matrix''', (b', flag), degree''')
+    -- delete node at given index
+    deleteNode :: Int -> [[Bool]] -> [[Bool]]
+    deleteNode index' m = do
+      -- remove edges to n
+      let m'  = map (\x -> replaceNth index' False x) m
+      -- remove edges from n
+      let m'' = replaceNth index' (take (length m') (repeat False)) m'
+      return m''
+    
+
 
 
 -- update "output" with new registers
-registerAlloc :: ([], []) -> Compile ()
-register parts = return ()
+registerOutput :: [X86Reg] -> [Int] -> [[Bool]] -> Compile ()
+registerOutput realRegs tempRegs colorMap = do
+  --for each elem in stack
+  traverseStack tempRegs
+  -- for each code
+  -- if stack elem == reg, replace
+  where
+    -- for each register, see if it needs to be updated somewhere
+    traverseStack :: [Int] -> Compile ()
+    traverseStack []     = ()
+    traverseStack (s:ss) = do
+      o     <- get output
+      let o' = traverseCode (s, o)
+      modify $ \st -> st { output = o'}
+      traverseStack ss
+      where
+        -- see if register needs to be updated in any line of code
+        traverseCode :: (Int, [Code]) -> [Code]
+        traverseCode x = \case
+          (s, []) -> []
+          (s, (c:cc)) -> do
+            let c'  = updateCode c (R s)
+            let cc' = traverseCode (s, cc)
+            return (c':cc')
+            where
+              -- update 1 line of code
+              updateCode :: Code -> Register -> Code
+              updateCode (Mov t v1 v2) r = (Mov t (swap v1 r) (swap v2 r))
+              updateCode (Pop t     v) r = (Pop t (swap v  r))
+              -- todo implement the rest
+
+          where
+          -- swap temp-reg with real reg if its the correct one
+          swap :: Value -> Register -> Value
+          swap v r colorMap realRegs = do
+            if (v == Reg r)
+              then (X86 (color2Reg r))
+              else v
+            where
+              -- get the real reg for a temp-reg, given a color mapping
+              color2Reg :: Register -> [[Bool]]
+              color2Reg (R reg) = do
+                -- the color of this reg
+                let color = getElem reg colorMap
+                --the real reg corresponding to the color 
+                return getElem (elemIndex True color) realRegs
+                -- more regs than colors since we removed spill, eaxctly k colors tho
 
 
 
@@ -699,8 +931,8 @@ compileFun (Ident f) t0 args ss = do
   mapM_ (\(Argument t' x, r) -> do
                                   r' <- newRegister (Lit t') --- todo maybe ptr lit t' cuz variable, not reg ish
                                   newVar x r' (Ptr (Lit t'))
-                                  emit $ Alloca r' (Lit t')
-                                  emit $ Store (Lit t') (Reg r) r'
+                                  -- emit $ Alloca r' (Lit t')
+                                  -- emit $ Store (Lit t') (Reg r) r'
                                 ) arg_reg
   -- store current parameters
   modify $ \st -> st { params = regs} -- todo not needed?
@@ -714,14 +946,15 @@ compileFun (Ident f) t0 args ss = do
     then do 
       prevStm <- gets output
       if (length prevStm /= 0 && (head $ words $ toLLVM $ head prevStm) == "ret")
-        then return ()
+        then ()
         else do
           -- pop registers
           emit $ Mov (X86 RBP) (X86 RSP) -- todo this will be after ret :\
           emit $ Pop (X86 RBP)
           emit $ Return
-          emit Return
-    else return ()
+    else ()
+  -- optimize
+  registerAlloc
 
 
 
@@ -746,9 +979,9 @@ compileDecl t (Init id (ETyped e _)) = do
   newVar id r (Ptr (Lit t))
   --emit $ Alloca r (Lit t) ---- todo create stack or 
   p  <- getPrevResult
-  p' <- loadReg p
+  -- p' <- loadReg p
   --emit $ Store (Lit t) p' r
-  emit $ Mov (Lit t) p' r
+  emit $ Mov (Lit t) p r
 
 compileDecl t (NoInit id) = do
   -- just create new variable
@@ -769,7 +1002,7 @@ compileStms (s : ss') = do
     then return True
     else compileStms ss'
 
--- move result to correct register
+-- move result to correct register (RAX or XMM0 if not there already) 
 fixReturnReg :: Type -> Value -> Compile ()
 fixReturnReg Doub (X86 XMM0) = return ()
 fixReturnReg Doub v = Mov (Lit Doub) v (X86 XMM0)
@@ -785,10 +1018,10 @@ compileStm (Retting s0 ret) = do
 
     Ret e@(ETyped _ t) -> do
       compileExp e False
-      r  <- getPrevResult
-      r' <- loadReg r
+      (r, Lit t)  <- getPrevResult
+      -- r' <- loadReg r
       --emit $ Return (Lit t) r'
-      fixReturnReg -- todo ?
+      fixReturnReg r t   -- todo ?
       -- pop registers
       emit $ Mov (X86 RBP) (X86 RSP) -- todo this will be after ret :\
       emit $ Pop (X86 RBP)
@@ -796,7 +1029,7 @@ compileStm (Retting s0 ret) = do
       return True
 
 
-    VRet -> do`
+    VRet -> do
       -- pop registers
       emit $ Mov (X86 RBP) (X86 RSP) -- todo this will be after ret :\
       emit $ Pop (X86 RBP)
@@ -831,8 +1064,8 @@ compileStm (Retting s0 ret) = do
           emit $ Label start
           compileExp e False
           r     <- getPrevResult
-          r'    <- loadReg r
-          emit $ Cmp r' (LitBool True)
+          -- r'    <- loadReg r
+          emit $ Cmp r (LitBool True) -- todo fixreturnreg
           emit $ BranchCond EE t f
           -- inside loop
           emit $ Label t
@@ -865,9 +1098,9 @@ compileStm (Retting s0 ret) = do
             compileExp e False
             t   <- newLabel
             f   <- newLabel
-            r   <- getPrevResult
-            r'  <- loadReg r -- todo maybe dont need loadreg
-            emit $ Cmp r' (LitBool True)
+            (r, typ)   <- getPrevResult
+            -- r'  <- loadReg r -- todo maybe dont need loadreg -- todo fixreturnreg
+            emit $ Cmp (Lit Bool) r (LitBool True)
             emit $ BranchCond EE t f
             -- statement 1
             emit $ Label t
@@ -903,9 +1136,9 @@ compileStm (Retting s0 ret) = do
           -- check expression
           compileExp e False
           r  <- getPrevResult
-          r' <- loadReg r
-          emit $ Cmp r' (LitBool True)
-          emit $ BranchCond EE t f
+          -- r' <- loadReg r -- todo fixreturnreg
+          emit $ Cmp r (LitBool True)
+          emit $ BranchCond EQU t f
           -- compile statement
           emit $ Label t
           inNewBlock $ compileStm s
@@ -917,10 +1150,10 @@ compileStm (Retting s0 ret) = do
 
     Ass x e@(ETyped _ typ) -> do
       compileExp e False
-      (a, t) <- lookupVar x
-      r      <- getPrevResult
-      r'     <- loadReg r
-      emit $ Mov (Lit typ) r' a
+      (a, t)  <- lookupVar x
+      (r, tr) <- getPrevResult
+      -- r'     <- loadReg r -- todo fixreturnreg
+      emit $ Mov (Lit typ) r (Reg a)
       --emit $ Store (Lit typ) r' a
       return False
 
@@ -940,17 +1173,15 @@ compileStm (Retting s0 ret) = do
 incDecr :: Ident -> AddOp -> Compile Bool
 incDecr i op = do
   (adr, t) <- lookupVar i
-  adr'''   <- loadReg (Reg adr, t)
+  -- adr'''   <- loadReg (Reg adr, t) -- todo fixreturnreg
   if (t == (Lit Int) || t == (Ptr (Lit Int)))
     then do 
-      emit $ IncDec op (Reg adr''')
+      emit $ IncDec op (Reg adr)
       return False
-    else
-      emit $ Add op (Lit Doub) (Reg adr''') (LitDoub 1.0)
-      if (adr''' /= (XMM0)) -- todo fix reg type
-        then emit $ Mov (Lit Doub) adr''' (X86 XMM0)
-        else ()
+    else do
+      emit $ Add op (Lit Doub) (LitDoub 1.0) (Reg adr)
       return False
+     
 
 -- get inner type of pointer
 unwrap :: LLVMType -> LLVMType
@@ -970,19 +1201,39 @@ emitBinaryOp t op' e1 e2 b = do
   -- compile arguments
   compileExp e1 True
   compileExp e2 True
-  allArgs <- gets prevResult
-  args'   <- mapM (\x -> loadReg x) $ take 2 allArgs
-  let [arg1, arg2] = args'
+  allArgs         <- gets prevResult
+  -- args'   <- mapM (\x -> loadReg x) $ take 2 allArgs -- todo fixreturnreg
+  let [(arg1, _), (arg2, _)] = take 2 allArgs
   -- create result register
-  r <- newRegister (Lit t)
+  r               <- newRegister (Lit t)
   -- compile and remove arguments
   case op' of
-    Ao op -> emit $ Add     r op (Lit t) arg2 arg1
-    Mo op -> emit $ Mul     r op (Lit t) arg2 arg1
-    Ro op -> emit $ Compare r op (Lit t) arg2 arg1
+    Ao op -> emit $ Add op (Lit t) arg2 arg1
+    Mo op -> emit $ Mul op (Lit t) arg2 arg1
+    Ro op -> compare    op (Lit t) arg2 arg1
   removeArgs 2
   setPrevVal (Reg r, (Lit t)) b
 
+  where
+    -- emit instructions for comparison
+    compare :: RelOp -> LLVMType -> Value -> Value -> Compile ()
+    compare op typ arg2 arg1 = do
+      emit $ Cmp typ arg2 arg1
+      t <- newLabel
+      f <- newLabel
+      e <- newLabel
+      emit $ BranchCond op t f
+      -- true
+      emit $ Label t
+      emit $ Mov (Lit Bool) (LitBool True) (X86 RAX)
+      emit $ Branch e
+      -- false
+      emit $ Label f
+      emit $ Mov (Lit Bool) (LitBool False) (X86 RAX)
+      emit $ Branch e
+      -- end
+      emit $ Label e
+      -- todo fix return? / guarantee return
 
 
 
@@ -1002,9 +1253,10 @@ compileExp e0 b = case e0 of
   EString s  -> do -- todo
     adr  <- newGlobalRegister
     emitGlobal $ Global adr (Lit String) (LitString s)
-    adr' <- newRegister (Lit String)
-    emit $ GetElementPointer adr' s adr $ I [0, 0]
-    setPrevVal (Reg adr', Lit String) b
+    --adr' <- newRegister (Lit String)
+    --emit $ GetElementPointer adr' s adr $ I [0, 0]
+    setPrevVal (Glob adr, Lit String) b -- todo  should be ok, we need to push but should be handled elsewhere? maybe loadReg should be used: do nothing if int / double, mov / otherwise
+    -- actually not the same, push has nothing to do with it, we always to push manually for arguments
 
 
   EVar x -> do
@@ -1019,9 +1271,9 @@ compileExp e0 b = case e0 of
     -- compile arguments and and make sure they dont override each other
     mapM_ (\e -> do
                   compileExp e False -- todo used to be true
-                  prev <- getPrevResult
-                  prev' <- loadReg prev
-                  emit $ Push prev') es
+                  (prev, typ) <- getPrevResult
+                  -- prev' <- loadReg -- todo fixreturnreg
+                  emit $ Push typ prev) es
     --allArgs <- gets prevResult
     --args    <- mapM (\x -> loadReg x) (reverse $ take n_args allArgs)
     -- fix types
@@ -1031,7 +1283,7 @@ compileExp e0 b = case e0 of
 
     emit $ Call (Lit t) id
     -- remove arguments from stack
-    emit $ Add (X86 RSP) (sum $ map (\x -> size (Lit x)) ts)
+    emit $ Add Plus (Lit t) (LitInt $ sum $ map (\x -> size (Lit x)) ts) (X86 RSP)
     if (t == Doub)
       then setPrevVal ((X86 XMM0), (Lit t)) b
       else setPrevVal ((X86 RAX ), (Lit t)) b
@@ -1056,38 +1308,38 @@ compileExp e0 b = case e0 of
   EAnd e1 e2 -> do
     -- e1 true?
     compileExp e1 True
-    r1        <- getPrevResult
-    e1_result <- loadReg r1
+    (e1_result, t1) <- getPrevResult
+    -- e1_result <- loadReg r1 -- todo fixreturnreg
     t         <- newLabel
     f         <- newLabel
     -- create result variable
     --result    <- newRegister (Lit Bool)
     --emit $ Alloca result (Lit Bool)
     -- if e1 true, then compile e2, otherwise skip (lazy eval)
-    emit $ Cmp e1_result (LitBool True)
-    emit $ EE e1_result t f 
+    emit $ Cmp t1 e1_result (LitBool True)
+    emit $ BranchCond EQU t f 
 
     -- e2 true?
     emit $ Label t 
     compileExp e2 False -- it is ok to overwrite e1_result
-    r2        <- getPrevResult
-    e2_result <- loadReg r2
+    (e2_result, typ2) <- getPrevResult
+    --e2_result <- loadReg r2 -- todo fixreturnreg
     t2        <- newLabel
     -- if e2 true, emit true, otherwise false
-    emit $ Cmp e2_result (LitBool True)
-    emit $ BranchCond EE t2 f
+    emit $ Cmp typ2 e2_result (LitBool True)
+    emit $ BranchCond EQU t2 f
 
     -- emit true
     emit $ Label t2
     --emit $ Store (Lit Bool) (LitBool True) result
-    emit $ Mov (LitBool True) (X86 RAX)
+    emit $ Mov (Lit Bool) (LitBool True) (X86 RAX)
     end <- newLabel
     emit $ Branch end
 
     -- emit false
     emit $ Label f
     --emit $ Store (Lit Bool) (LitBool False) result
-    emit $ Mov (LitBool False) (X86 RAX)
+    emit $ Mov (Lit Bool) (LitBool False) (X86 RAX)
     emit $ Branch end
 
     -- end
@@ -1099,38 +1351,38 @@ compileExp e0 b = case e0 of
   EOr e1 e2 -> do
     -- e1 true?
     compileExp e1 True
-    r1        <- getPrevResult
-    e1_result <- loadReg r1
+    (e1_result, t1) <- getPrevResult
+    -- e1_result <- loadReg r1 -- todo fixreturnreg
     t         <- newLabel
     f         <- newLabel
     --result    <- newRegister (Lit Bool)
     -- create result variable
     --emit $ Alloca result (Lit Bool)
     -- if e1 true, then emit true, otherwise check e2
-    emit $ Cmp e1_result (LitBool True)
-    emit $ BranchCond EE t f 
+    emit $ Cmp t1 e1_result (LitBool True)
+    emit $ BranchCond EQU t f 
 
     -- e2 true?
     emit $ Label f 
     compileExp e2 False -- ok to overwrite e1_result
-    r2        <- getPrevResult
-    e2_result <- loadReg r2
+    (e2_result, t2) <- getPrevResult
+    -- e2_result <- loadReg r2 -- todo fixreturnreg
     f2        <- newLabel
     -- if e2 true, then emit true, otherwise emit false
-    emit $ Cmp e2_result (LitBool True)
-    emit $ BranchCond EE t f2 
+    emit $ Cmp t2 e2_result (LitBool True)
+    emit $ BranchCond EQU t f2 
 
     -- both were false
     emit $ Label f2
     --emit $ Store (Lit Bool) (LitBool False) result
-    emit $ Mov (LitBool False) (X86 RAX)
+    emit $ Mov (Lit Bool) (LitBool False) (X86 RAX)
     end <- newLabel
     emit $ Branch end
 
     -- something was true
     emit $ Label t
     --emit $ Store (Lit Bool) (LitBool True) result
-    emit $ (LitBool True) (X86 RAX)
+    emit $ Mov (Lit Bool) (LitBool True) (X86 RAX)
     emit $ Branch end
 
     -- end
@@ -1143,29 +1395,27 @@ compileExp e0 b = case e0 of
     if (t == Int)
       then do 
         compileExp (ETyped e t) b
-        r  <- getPrevResult
-        r' <- loadReg
-        case r' of
-          (LitInt i) -> setPrevVal (LitInt (-1)*i, Lit Int )
-          _          -> emit $ Neg r'  -- todo fix type?
+        (LitInt i, t') <- getPrevResult
+        -- r' <- loadReg -- todo fixreturnreg
+        setPrevVal (LitInt ((-1)*i), Lit Int ) b
       else
         case e of
           (ELitDoub d) -> do
             compileExp (ETyped e t) b
-            r  <- getPrevResult
-            r' <- loadReg
-            setPrevVal (LitInt (-1.0)*d, Lit Doub)
+            r' <- getPrevResult
+            -- r' <- loadReg -- todo fixreturnreg
+            setPrevVal (LitDoub ((-1.0)*d), Lit Doub) b
           _            -> compileExp (ETyped (EMul e Times (ELitDoub (-1.0)) ) t) b
     
 
   Not (ETyped e Bool) -> do
     case e of
-      (ELitTrue)  -> setPrevVal (LitBool False, Lit Bool)
-      (ELitFalse) -> setPrevVal (LitBool True, Lit Bool)
+      (ELitTrue)  -> setPrevVal (LitBool False, Lit Bool) b -- idk if b or false
+      (ELitFalse) -> setPrevVal (LitBool True, Lit Bool) b
       _           -> do
         compileExp e True -- todo why not false?
-        r <- getPrevResult
-        emit $ Neg r 
+        (r, t) <- getPrevResult
+        emit $ CNeg r 
 
 
   ETyped e _ -> compileExp e b
