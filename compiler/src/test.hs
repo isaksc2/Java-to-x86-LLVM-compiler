@@ -1,14 +1,7 @@
 main :: IO ()
 main = do
-    f 1
+    if (True)
+        then return ()
+        else putStrLn "aasd"
+    putStrLn "asdadasdasdasdasdasd"
 
-
-
-
-
-
-f :: Int -> Int
-f 1 = a
-f 2 = a
-    where
-        a = 3
