@@ -62,7 +62,7 @@ compile (Program defs) = do
 
 type Sig = Map Ident FunHead -- functions
 type Cxt = [Block]           -- variables
-type Block = [(Ident, Register, LLVMType)]
+type Block = [(Ident, Value, LLVMType)]
 type Output = [Code]         -- llvm code
 type Compile = State St      -- state
 
@@ -74,6 +74,9 @@ newtype Label = L {theLabel :: Int}
   deriving (Eq, Enum, Show)
 
 newtype Register = R {theRegister :: Int}
+  deriving (Eq, Enum, Show)
+
+newtype Param = P {theParameter :: Int}
   deriving (Eq, Enum, Show)
 
 -- register for strings
@@ -95,13 +98,15 @@ data St = St
   , cxt          :: Cxt
   , nextLabel    :: Label
   , nextReg      :: Register
+  , nextPar      :: Param
   , output       :: Output
   , prevResult   :: [(Value, LLVMType)]
   , globalOut    :: Output
   , globals      :: Block
   , nextGlobal   :: GlobalRegister
-  , params       :: [Register]
-  , regSize      :: Map Int Integer
+  , params       :: [Param]
+  , regSize      :: Map Int Integer -- todo still needed?
+  , parSize      :: Map Int Integer
   }
 
 -- initial state
@@ -110,6 +115,7 @@ initSt s = St { sig          = s
               , cxt          = [[]]
               , nextLabel    = L 0
               , nextReg      = R 0
+              , nextPar      = P 0
               , output       = []
               , prevResult   = []
               , globalOut    = []
@@ -117,6 +123,7 @@ initSt s = St { sig          = s
               , nextGlobal   = G 0
               , params       = []
               , regSize      = Map.empty
+              , parSize      = Map.empty
               }
 
 builtin :: [(Ident, FunHead)]
@@ -155,7 +162,7 @@ data Operator = Mo MulOp | Ao AddOp | Ro RelOp
 
 -- built in registers
 data X86Reg
-  = Stack Int
+  = Stack Int | Param Int
   | RBP | RSP | RIP | RDI | RSI | RAX | RCX | RDX | RBX | R8 | R9 | R10 | R11 | R12 | R13 | R14 | R15
   | XMM0 | XMM1 | XMM2 | XMM3 | XMM4 | XMM5 | XMM6 | XMM7 | XMM8 | XMM9 | XMM10 | XMM11 | XMM12 | XMM13 | XMM15 
   deriving(Show, Eq)
@@ -265,6 +272,16 @@ newRegister t = do
   modify $ \st -> st { regSize = Map.insert (theRegister v) (size t) rs }
   return v
 
+
+-- create the next register name
+newParam :: LLVMType -> Compile Param
+newParam t = do
+  (P v) <- gets nextPar
+  modify $ \st -> st { nextPar = (P (v + fromIntegral (size t))) }
+  rs <- gets parSize
+  modify $ \st -> st { parSize = Map.insert v (size t) rs }
+  return (P v)
+
 -- calculate register size
 size :: LLVMType -> Integer
 size (Ptr _) = 4
@@ -272,19 +289,19 @@ size (Lit Doub) = 8
 size (Lit _) = 4
 
 -- add new variable to the state
-newVar :: Ident -> Register -> LLVMType -> Compile ()
+newVar :: Ident -> Value -> LLVMType -> Compile ()
 newVar x r t = modify $ \st@St { cxt = (b : bs) } -> st { cxt = ((x, r, t) : b) : bs }
 
 
 -- get type and register for a variable
-lookupVar :: Ident -> Compile (Register, LLVMType)
+lookupVar :: Ident -> Compile (Value, LLVMType)
 lookupVar id = do 
   c <- gets cxt
   return (fromJust $ cxtContains id c)
   where
 
     -- context contains var?
-    cxtContains :: Ident -> [[(Ident, Register, LLVMType)]] -> Maybe (Register, LLVMType)
+    cxtContains :: Ident -> [[(Ident, Value, LLVMType)]] -> Maybe (Value, LLVMType)
     cxtContains id []     = Nothing
     cxtContains id (b:bs) = do 
       let firstSearch = contains id b 
@@ -294,7 +311,7 @@ lookupVar id = do
       where
 
         -- block containts var?
-        contains :: Ident -> [(Ident, Register, LLVMType)] -> Maybe (Register, LLVMType)
+        contains :: Ident -> [(Ident, Value, LLVMType)] -> Maybe (Value, LLVMType)
         contains id []               = Nothing
         contains id ((id', r, t):vs) = if (id == id')
           then Just (r, t)
@@ -537,7 +554,7 @@ registerAlloc :: Compile ()
 registerAlloc = do
   -- get def, use and succ sets
   (d, iu, du, s) <- defUseSucc
-  error (show d)
+  --error (show d)
   --error ("_____" ++ (show d ))
   -- calculate liveness
   li             <- liveness (d, iu, s)
@@ -998,16 +1015,18 @@ compileFun (Ident f) t0 args ss = do
   modify $ \st -> st { output = []}
   modify $ \st -> st { globalOut = []}
   modify $ \st -> st { nextReg = R 0}
+  modify $ \st -> st { nextPar = P 8}
   -- make parameter registers
   --regs <- mapM (\(Argument t' x) -> newRegister (Lit t')) args ---------------------- todo prob dont need both param and alloc
   --let arg_reg = zip args regs
   -- make a new variable and alloc memory for each parameter:
   regs <- mapM (\(Argument t' x) -> do
-                                        r' <- newRegister (Lit t') --- todo maybe ptr lit t' cuz variable, not reg ish
-                                        newVar x r' (Ptr (Lit t'))
+                                        --r' <- newRegister (Lit t') --- todo maybe ptr lit t' cuz variable, not reg ish
+                                        (P r') <- newParam (Lit t')
+                                        newVar x (X86 (Param r')) (Ptr (Lit t'))
                                         -- emit $ Alloca r' (Lit t')
                                         -- emit $ Store (Lit t') (Reg r) r'
-                                        return r'
+                                        return (P r')
                                       ) args
   -- store current parameters
   modify $ \st -> st { params = regs} -- todo not needed?
@@ -1051,7 +1070,7 @@ compileDecl t (Init id (ETyped e _)) = do
   -- compile expression and make new variable
   compileExp (ETyped e t) False
   r <- newRegister (Lit t)
-  newVar id r (Ptr (Lit t))
+  newVar id (Reg r) (Ptr (Lit t))
   --emit $ Alloca r (Lit t) ---- todo create stack or 
   (p, t')  <- getPrevResult
   -- p' <- loadReg p
@@ -1061,7 +1080,7 @@ compileDecl t (Init id (ETyped e _)) = do
 compileDecl t (NoInit id) = do
   -- just create new variable
   r <- newRegister (Lit t)
-  newVar id r (Ptr (Lit t))
+  newVar id (Reg r) (Ptr (Lit t))
   --emit $ Alloca r (Lit t)
 
 
@@ -1231,7 +1250,7 @@ compileStm (Retting s0 ret) = do
       (a, t)  <- lookupVar x
       (r, tr) <- getPrevResult
       -- r'     <- loadReg r -- todo fixreturnreg
-      emit $ Mov (Lit typ) r (Reg a)
+      emit $ Mov (Lit typ) r a
       --emit $ Store (Lit typ) r' a
       return False
 
@@ -1254,10 +1273,10 @@ incDecr i op = do
   -- adr'''   <- loadReg (Reg adr, t) -- todo fixreturnreg
   if (t == (Lit Int) || t == (Ptr (Lit Int)))
     then do 
-      emit $ IncDec op (Reg adr)
+      emit $ IncDec op adr
       return False
     else do
-      emit $ Add op (Lit Doub) (LitDoub 1.0) (Reg adr)
+      emit $ Add op (Lit Doub) (LitDoub 1.0) adr
       return False
      
 
@@ -1340,7 +1359,7 @@ compileExp e0 b = case e0 of
 
   EVar x -> do
     (a, t) <- lookupVar x
-    setPrevVal (Reg a, t) b
+    setPrevVal (a, t) b
 
 
   EApp x@(Ident _) es -> do
