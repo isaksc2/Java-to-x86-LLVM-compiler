@@ -18,8 +18,10 @@ import X86Backend
 
 main :: IO ExitCode
 main = do
-  program <- hGetContents stdin
+  --program <- hGetContents stdin
+  program <- readFile "test.c"
   check program
+  --check "int main() { if (true == true) {printInt(42);} return 0;}"
 
 -- | Parse and type check a program given by the @String@.
 check :: String -> IO ExitCode

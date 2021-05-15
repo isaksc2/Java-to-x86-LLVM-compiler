@@ -19,6 +19,7 @@ import           Data.Maybe
 import           Data.Map                       ( Map )
 import qualified Data.Map                      as Map
 import           Data.List
+import           Data.Char
 
 
 -- | Entry point.
@@ -36,13 +37,13 @@ compile (Program defs) = do
   -- string header
   let dat = if (globs == "")
               then ""
-              else "segment .data"
+              else "segment .data\n"
   -- text header
   let text = unlines ["segment .text", "\tglobal main"]
   -- functions
   let funcs = unlines (map fst code)
   -- append everything and remove the last 2 extra newlines
-  reverse $ drop 2 $ reverse $ decl ++ dat ++ globs ++ text ++ "\n" ++ funcs
+  reverse $ drop 2 $ reverse $ decl ++ "\n" ++  dat ++ globs ++ "\n" ++ text ++ "\n" ++ funcs
   where
 
     -- initial state with only builtin
@@ -179,7 +180,7 @@ data Code
   | Cmp LLVMType Value Value
   -- | Alloca Register LLVMType
   | Branch Label
-  | BranchCond RelOp Label Label
+  | BranchCond RelOp Label
   | Global GlobalRegister LLVMType Value
   -- | GetElementPointer Register String GlobalRegister Index
   | Comment String
@@ -380,7 +381,7 @@ instance ToLLVM FunHead where
   toLLVM (FunHead (Ident f) (FunType t ts)) = "define " ++ toLLVM t ++ " @" ++ f ++ "(" ++ ( reverse ( drop 2 ( reverse (((\t -> t ++ ", ") . toLLVM) =<< ts)))) ++ ")"
 
 instance ToLLVM Label where
-  toLLVM (L l) = "lab" ++ show l
+  toLLVM (L l) = "L" ++ show l
 
 instance ToLLVM Value where
   toLLVM = \case
@@ -391,12 +392,15 @@ instance ToLLVM Value where
     LitString s   -> error $ "can only print adress to string, not string directly"
     Reg r         -> toLLVM r
     Glob g        -> toLLVM g 
+    X86 reg       -> (map (\c -> toLower c) (show reg))
+    X86 (Stack n) -> "[rbp -" ++ show n ++ "]"
+    -- todo arguments + 8 + 12 +16...
     
 instance ToLLVM Register where
-  toLLVM (R r) = "%r" ++ show r
+  toLLVM (R r) = "________r" ++ show r
 
 instance ToLLVM GlobalRegister where
-  toLLVM (G g) = "@g" ++ show g
+  toLLVM (G g) = "str" ++ show g
 
 instance ToLLVM Arguments where
   toLLVM (Args [])          = ""
@@ -407,27 +411,34 @@ instance ToLLVM Arguments where
 stringType :: String -> String
 stringType s = "[" ++ show ( (length s) + 1) ++ " x i8]"
 
+
+instructionIncDec :: AddOp -> String
+instructionIncDec Plus = "inc"
+instructionIncDec Minus = "dec"
+
 instance ToLLVM Code where
   toLLVM = \case
-   -- Store t from to                        -> "store " ++ toLLVM t ++ " "  ++ toLLVM from ++ " , " ++ toLLVM (Ptr t) ++ " " ++ toLLVM to
-    -- Load adr t reg                         -> toLLVM adr ++ " = load "     ++ toLLVM t    ++ " , " ++ toLLVM (Ptr t) ++ " " ++ toLLVM reg
     Return                           -> "ret"  -- ++ toLLVM t ++ " "  ++ toLLVM v
-   -- ReturnVoid                             -> "ret void"
-    Call t (Ident f)             -> "call " ++ toLLVM t ++ " @" ++ f
-    -- CallVoid t (Ident f) args              -> "call " ++ toLLVM t ++ " @" ++ f ++ "(" ++ toLLVM args ++ ")"
+    Call t (Ident f)             -> "call " ++ f
     Label l                                -> toLLVM l ++ ":"
-    -- Compare adr op t v1 v2 | t == Lit Doub -> toLLVM adr ++ " = fcmp "   ++ prefixRelOp t op ++ " " ++ toLLVM t ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
-   --                        | otherwise     -> toLLVM adr ++ " = icmp "   ++ prefixRelOp t op ++ " " ++ toLLVM t ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
-    Add op t v1 v2 | t == Lit Int      -> toLLVM op        ++ " " ++ toLLVM t ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
-                   | t == Lit Doub     -> "f" ++ toLLVM op        ++ " " ++ toLLVM t ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
-    Mul op t v1 v2                     -> (prefixMulOp t op)      ++ " " ++ toLLVM t ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
+    Cmp t v1 v2 | t == Lit Doub -> "cmpsd"  ++ toLLVM v1 ++ ", " ++ toLLVM v2
+                | otherwise     -> "cmp  "  ++ toLLVM v1 ++ ", " ++ toLLVM v2
+    Add op t v1 v2 | t == Lit Int      -> toLLVM op         ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
+                   | t == Lit Doub     -> toLLVM op        ++ "sd " ++ toLLVM v1 ++ ", " ++ toLLVM v2
+    Mul op t v1 v2                     -> (prefixMulOp t op)      ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
     -- Alloca adr t                           -> toLLVM adr ++ " = alloca " ++ toLLVM t
-    Branch lb                              -> "br label %" ++ toLLVM lb
-    BranchCond c lb1 lb2                   -> "br i1 " ++ toLLVM c ++ ", label %" ++ toLLVM lb1 ++ ", label %" ++ toLLVM lb2
-    Global adr t (LitString s)             -> toLLVM adr ++ " = internal constant " ++ stringType s ++  " c\"" ++ s ++ "\\00\""
+    Branch lb                               -> "jmp " ++ toLLVM lb
+    BranchCond op lb                 -> "j" ++ toLLVM op ++ " " ++ toLLVM lb
+    Global adr t (LitString s)             -> toLLVM adr ++ " db \"" ++ s ++ "\""
    -- GetElementPointer r' s r i             -> toLLVM r' ++ " = getelementptr " ++ stringType s ++ ", " ++ stringType s ++ "* " ++ toLLVM r ++ ", " ++ toLLVM i
+    Mov t v1 v2                       -> "mov " ++ toLLVM v2 ++ ", " ++ toLLVM v1
+    Pop t v           -> "pop " ++ toLLVM v
+    Push t v -> "push " ++ toLLVM v 
+    IncDec op v -> instructionIncDec op ++ " " ++ toLLVM v
+    CNeg v -> "neg " ++ toLLVM v
     Comment ""                             -> ""
     Comment s                              -> "; " ++ s
+    c -> show c
 -- todo fix align
 
 
@@ -526,9 +537,12 @@ registerAlloc :: Compile ()
 registerAlloc = do
   -- get def, use and succ sets
   (d, iu, du, s) <- defUseSucc
+  error (show d)
+  --error ("_____" ++ (show d ))
   -- calculate liveness
   li             <- liveness (d, iu, s)
   ld             <- liveness (d, du, s)
+  emit $ Comment (show li)
   -- get interference graph
   let ii         = interference li
   let id         = interference ld
@@ -558,9 +572,12 @@ registerAlloc = do
   registerOutput dStack sd sld
   -- decrement RSP to make space for stack variables
   o             <- gets output
-  let (o1, o2)   = splitAt 2 o
-  let code       = (Add Minus (Lit Int) (X86 RSP) (LitInt (toInteger $ intLocals + doubLocals)))
-  modify $ \st -> st { output = o1++(code:o2)}
+  let (o1, o2)   = splitAt 2 (reverse o)
+  let localSize  = intLocals + doubLocals
+  let prep       = if (localSize > 0)
+                    then (Add Minus (Lit Int) (X86 RSP) (LitInt (toInteger $ localSize))):o2
+                    else                                                                  o2
+  modify $ \st -> st { output = reverse (o1++prep)}
 
 
 
@@ -612,11 +629,13 @@ defUseSucc = do
                   (R n_reg)     <- gets nextReg
                   let thisReg    = replaceNth (theRegister r) True (bitArray n_reg)
                   let thisReg'   = map (\(a,b) -> ((not a) && b)) (zip deffed thisReg)
+                  --error (show thisReg' ++ "--------------")
                   -- update 
                   let deffed'    = map (\(a,b) -> a || b)         (zip deffed thisReg')
                   return (thisReg', deffed')
                 defV _       = do
                   (R n_reg)     <- gets nextReg
+                  --error (show n_reg ++ "--------------")
                   return ((bitArray n_reg), deffed)
             ---------------------------------------------------------------
             -- only mov-instructions can introduce new variables
@@ -628,10 +647,7 @@ defUseSucc = do
     -- get succ set for a line of code
     succSet :: Code -> Compile [Bool]
     succSet (Branch l)           = succL l -- todo first label was f:, and is defined outside this scope, do i need to care about he first one? u cant jump to it
-    succSet (BranchCond _ l1 l2) = do 
-      l1' <- succL l1
-      l2' <- succL l2
-      return $ bitOr l1' l2'
+    succSet (BranchCond _ l) = succL l
     succSet _                    = do
       o   <- gets output
       return $ bitArray $ length o -- todo: need to add 1 extra elem for f:? no cause its not in output ig?
@@ -653,9 +669,15 @@ defUseSucc = do
     -- get use set for a line of code, first set is ints, the second is doubles
     use :: Code -> Compile ([Bool], [Bool])
     use x = case x of
-      (Mov t   v1 v2) -> combine t v1 v2
-      (Cmp t v1   v2) -> combine t v1 v2 -- todo implement the other types
-      (Pop t       v) -> combine t v (LitInt (-1)) -- dummy
+      (Add _  t v1   v2) -> combine t v1 v2
+      (Mul _  t v1   v2) -> combine t v1 v2
+      (Mov    t v1   v2) -> combine t v1 v2
+      (Cmp    t v1   v2) -> combine t v1 v2
+      (Pop    t       v) -> combine t         v (LitInt (-1)) -- -1 is dummy value
+      (Push   t       v) -> combine t         v (LitInt (-1)) 
+      (IncDec _       v) -> combine (Lit Int) v (LitInt (-1)) 
+      (CNeg           v) -> combine (Lit Int) v (LitInt (-1))
+      _                  -> combine (Lit Int)   (LitInt (-1)) (LitInt (-1))
       where
       
       -- get the use set for 2 values
@@ -705,7 +727,9 @@ liveness dus = do
       -- successors "-" def set
       let s_minus_d = map (\(o, d) -> bitMinus o d) (zip out defs)
       -- livein for this iteration
+      --error (show defs)
       let livein''  = map (\(u, smd) -> bitOr u smd) (zip uses s_minus_d)
+      --return uses
       -- repeat if not done
       if (livein' == livein'')
         then livein''
@@ -714,6 +738,7 @@ liveness dus = do
 
         -- get livein of successors
         liveSucc :: [Bool] -> [[Bool]] -> [Bool]
+        liveSucc []      _     = []
         liveSucc (s:ss) (l:ls) = do
           let l'  = if (s)
                       then l 
@@ -900,6 +925,7 @@ registerOutput realRegs tempRegs colorMap = do
               updateCode x r = case x of
                 (Mov t v1 v2) -> (Mov t (swap v1 r) (swap v2 r))
                 (Pop t     v) -> (Pop t (swap v  r))
+                c -> c
               -- todo implement the rest
                 where
 
@@ -973,15 +999,16 @@ compileFun (Ident f) t0 args ss = do
   modify $ \st -> st { globalOut = []}
   modify $ \st -> st { nextReg = R 0}
   -- make parameter registers
-  regs <- mapM (\(Argument t' x) -> newRegister (Lit t')) args ---------------------- todo prob dont need both param and alloc
-  let arg_reg = zip args regs
+  --regs <- mapM (\(Argument t' x) -> newRegister (Lit t')) args ---------------------- todo prob dont need both param and alloc
+  --let arg_reg = zip args regs
   -- make a new variable and alloc memory for each parameter:
-  mapM_ (\(Argument t' x, r) -> do
-                                  r' <- newRegister (Lit t') --- todo maybe ptr lit t' cuz variable, not reg ish
-                                  newVar x r' (Ptr (Lit t'))
-                                  -- emit $ Alloca r' (Lit t')
-                                  -- emit $ Store (Lit t') (Reg r) r'
-                                ) arg_reg
+  regs <- mapM (\(Argument t' x) -> do
+                                        r' <- newRegister (Lit t') --- todo maybe ptr lit t' cuz variable, not reg ish
+                                        newVar x r' (Ptr (Lit t'))
+                                        -- emit $ Alloca r' (Lit t')
+                                        -- emit $ Store (Lit t') (Reg r) r'
+                                        return r'
+                                      ) args
   -- store current parameters
   modify $ \st -> st { params = regs} -- todo not needed?
   -- push registers
@@ -1114,7 +1141,8 @@ compileStm (Retting s0 ret) = do
           (r, typ')     <- getPrevResult
           -- r'    <- loadReg r
           emit $ Cmp (Lit typ) r (LitBool True) -- todo fixreturnreg
-          emit $ BranchCond EQU t f
+          emit $ BranchCond EQU t
+          emit $ Branch f
           -- inside loop
           emit $ Label t
           inNewBlock $ compileStm s
@@ -1149,7 +1177,8 @@ compileStm (Retting s0 ret) = do
             (r, typ)   <- getPrevResult
             -- r'  <- loadReg r -- todo maybe dont need loadreg -- todo fixreturnreg
             emit $ Cmp (Lit Bool) r (LitBool True)
-            emit $ BranchCond EQU t f
+            emit $ BranchCond EQU t
+            emit $ Branch f
             -- statement 1
             emit $ Label t
             inNewBlock $ compileStm s1
@@ -1186,7 +1215,8 @@ compileStm (Retting s0 ret) = do
           (r, typ')  <- getPrevResult
           -- r' <- loadReg r -- todo fixreturnreg
           emit $ Cmp (Lit typ) r (LitBool True)
-          emit $ BranchCond EQU t f
+          emit $ BranchCond EQU t
+          emit $ Branch f
           -- compile statement
           emit $ Label t
           inNewBlock $ compileStm s
@@ -1270,7 +1300,8 @@ emitBinaryOp t op' e1 e2 b = do
       t <- newLabel
       f <- newLabel
       e <- newLabel
-      emit $ BranchCond op t f
+      emit $ BranchCond op t
+      emit $ Branch f
       -- true
       emit $ Label t
       emit $ Mov (Lit Bool) (LitBool True) (X86 RAX)
@@ -1331,7 +1362,7 @@ compileExp e0 b = case e0 of
 
     emit $ Call (Lit t) id
     -- remove arguments from stack
-    emit $ Add Plus (Lit t) (LitInt $ sum $ map (\x -> size (Lit x)) ts) (X86 RSP)
+    emit $ Add Plus (Lit Int) (LitInt $ sum $ map (\x -> size (Lit x)) ts) (X86 RSP)
     if (t == Doub)
       then setPrevVal ((X86 XMM0), (Lit t)) b
       else setPrevVal ((X86 RAX ), (Lit t)) b
@@ -1365,7 +1396,8 @@ compileExp e0 b = case e0 of
     --emit $ Alloca result (Lit Bool)
     -- if e1 true, then compile e2, otherwise skip (lazy eval)
     emit $ Cmp t1 e1_result (LitBool True)
-    emit $ BranchCond EQU t f 
+    emit $ BranchCond EQU t
+    emit $ Branch f
 
     -- e2 true?
     emit $ Label t 
@@ -1375,7 +1407,8 @@ compileExp e0 b = case e0 of
     t2        <- newLabel
     -- if e2 true, emit true, otherwise false
     emit $ Cmp typ2 e2_result (LitBool True)
-    emit $ BranchCond EQU t2 f
+    emit $ BranchCond EQU t2
+    emit $ Branch f
 
     -- emit true
     emit $ Label t2
@@ -1408,7 +1441,8 @@ compileExp e0 b = case e0 of
     --emit $ Alloca result (Lit Bool)
     -- if e1 true, then emit true, otherwise check e2
     emit $ Cmp t1 e1_result (LitBool True)
-    emit $ BranchCond EQU t f 
+    emit $ BranchCond EQU t
+    emit $ Branch f
 
     -- e2 true?
     emit $ Label f 
@@ -1418,7 +1452,8 @@ compileExp e0 b = case e0 of
     f2        <- newLabel
     -- if e2 true, then emit true, otherwise emit false
     emit $ Cmp t2 e2_result (LitBool True)
-    emit $ BranchCond EQU t f2 
+    emit $ BranchCond EQU t
+    emit $ Branch f2 -- todo fix all of these
 
     -- both were false
     emit $ Label f2

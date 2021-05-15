@@ -1,15 +1,14 @@
-int f (int x, int y) {
-    int z = x + y;
-    return z;
+int f(int b, int a) {
+  printInt(a);
+  return 0 ;
+
 }
 
-double g (double x, double y) {
-    double z = x + y;
-    return z;
+int main() {
+  if (true == true) { printInt(42); }
+  printString("hi");
+  printString("ayyyy");
+  return 0 ;
+
 }
 
-void h (int b) {
-    int h = b;
-}
-
- 

@@ -1,0 +1,83 @@
+few registers
+7 or 8 in 32 bit 
+need to use stack frame instead of alloc, and then dealloc the frame 
+
+nasm syntax the most readable 
+
+ebp base pptr = beginning of stack frame 
+esp stack ptr = current alocated part of stack ptr 
+
+f:
+    push dword ebp = cause its the callers ebp 
+    mov ebp, esp = assign esp to ebp
+    sub esp 4 = allocate 1 byte on stack for esp (stack grow down) (return value?)
+    ...
+    <store result in eax>
+    mov [ebp-4], eax = put return value 
+    mov esp ebp = deallocates the entire stack we used
+    pop ebp = callers ebp
+    ret
+
+find arguments using ebp + offset
+word = 4 byte
+
+stack layout of foo(x, y):
+x 
+y 
+ret address 
+ebp 
+
+
+
+convention
+    ret int in eax 
+    ret float int st0 
+    eax ecx edx are callre saver, rest are callee saved 
+    st0-st7 must be empty (popped / freed) when calling new func
+    st1-7 must be empty when exiting func, st0 empty if no return float
+
+
+put argument int 1 on stack = push 1
+call incr 
+add esp 4 = remove argument 1 from stack (call incr doesnt leave anything on stack, only eax)
+
+compiler traget: 
+    isa - what isntructions exist
+    cal convention - rules for how to use stack + reg
+        u can use any dor urself, but to call external stuff u need to follow theirs
+
+
+32 bit = eax ....
+64 bit = rex ....
+
+dont need to use st0-7
+
+status registers for comparisons
+
+if use 64 bit then u can use floating point reg rather than st0-7
+xmmm0-7
+each hold 2 double precision float or 4 singles
+can add the regiesters together but we dont need to
+
+
+
+call f: just pushes the stack address of the next instruction to the stack and then goes to f
+
+cmp v1 v2
+v1-v2
+1 can be register
+only crates flags
+ZF = same
+OF = 
+SF = signed bit set?
+....
+could also use sub, only difference is that it also stores result in eax?
+
+JZ lab = branch if zf set
+jl lab = br if sf set
+
+
+
+for floats, use fcomi stc ------------ no its for st0
+arguemnts are 8 12 16 ...
+local vars are -4 -8 -12 ... 
