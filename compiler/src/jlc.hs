@@ -19,7 +19,8 @@ import X86Backend
 main :: IO ExitCode
 main = do
   --program <- hGetContents stdin
-  program <- readFile "test.c"
+  --program <- readFile "test.c"
+  program <- readFile "../../test/testsuite/good/core031.jl"
   check program
   --check "int main() { if (true == true) {printInt(42);} return 0;}"
 

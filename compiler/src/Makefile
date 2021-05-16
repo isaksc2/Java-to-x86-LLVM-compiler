@@ -14,8 +14,10 @@ files=jlc.hs Javalette.cf Makefile TypeChecker.hs LlvmBackend.hs X86Backend.hs
 # 'lab2' is default goal and needs to remain first goal in this file!
 # The extra dependency Javalette/Test ensures that the parser is built from Javalette.cf
 
-jlc : $(files) Javalette/Test
-	ghc --make jlc.hs -o jlc
+jlc_x64 : $(files) Javalette/Test
+	ghc --make jlc.hs -o jlc_x64 
+
+# todo jlc
 
 # Rules to build the parser:
 
@@ -51,7 +53,7 @@ distclean : clean
 	-rm -f Javalette/Doc.* Javalette/Lex.* Javalette/Par.* Javalette/Layout.* Javalette/Skel.* Javalette/Print.* Javalette/Test.* Javalette/Abs.* Javalette/Test Javalette/ErrM.* Javalette/SharedString.* Javalette/ComposOp.* Javalette/Javalette.dtd Javalette/XML.* Javalette/*.bak
 	-rmdir -p Javalette/
 	-rm -f lab1.tar.gz lab2
-	-rm jlc
+	-rm jlc_x64
 	-rm main.ll
 
 # EOF

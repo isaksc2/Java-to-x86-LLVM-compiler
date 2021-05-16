@@ -441,19 +441,20 @@ instance ToLLVM Code where
     Label l                                -> toLLVM l ++ ":"
     Cmp t v1 v2 | t == Lit Doub -> "cmpsd"  ++ toLLVM v1 ++ ", " ++ toLLVM v2
                 | otherwise     -> "cmp  "  ++ toLLVM v1 ++ ", " ++ toLLVM v2
-    Add op t v1 v2 | t == Lit Int      -> toLLVM op         ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
+    Add op t v1 v2 | t == Lit Int      -> toLLVM op         ++ "  " ++ toLLVM v1 ++ ", " ++ toLLVM v2
                    | t == Lit Doub     -> toLLVM op        ++ "sd " ++ toLLVM v1 ++ ", " ++ toLLVM v2
     Mul op t v1 v2                     -> (prefixMulOp t op)      ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
     -- Alloca adr t                           -> toLLVM adr ++ " = alloca " ++ toLLVM t
-    Branch lb                               -> "jmp " ++ toLLVM lb
-    BranchCond op lb                 -> "j" ++ toLLVM op ++ " " ++ toLLVM lb
+    Branch lb                               -> "jmp  " ++ toLLVM lb
+    BranchCond op lb                 -> "j" ++ toLLVM op ++ "  " ++ toLLVM lb
     Global adr t (LitString s)             -> toLLVM adr ++ " db \"" ++ s ++ "\""
    -- GetElementPointer r' s r i             -> toLLVM r' ++ " = getelementptr " ++ stringType s ++ ", " ++ stringType s ++ "* " ++ toLLVM r ++ ", " ++ toLLVM i
-    Mov t v1 v2                       -> "mov " ++ toLLVM v2 ++ ", " ++ toLLVM v1
-    Pop t v           -> "pop " ++ toLLVM v
-    Push t v -> "push " ++ toLLVM v 
+    Mov t v1 v2                       -> "mov  " ++ toLLVM v2 ++ ", " ++ toLLVM v1
+    Pop t v           -> "pop  " ++ toLLVM v
+    Push t v | t == Lit Doub -> "push dword " ++ toLLVM v 
+             | otherwise -> "push " ++ toLLVM v 
     IncDec op v -> instructionIncDec op ++ " " ++ toLLVM v
-    CNeg v -> "neg " ++ toLLVM v
+    CNeg v -> "neg  " ++ toLLVM v
     Comment ""                             -> ""
     Comment s                              -> "; " ++ s
     c -> show c
@@ -599,9 +600,15 @@ registerAlloc = do
   o             <- gets output
   let (o1, o2)   = splitAt 2 (reverse o)
   let localSize  = intLocals + doubLocals
+  -- align stack if not 128 bit aligned
+  (P p)         <- gets nextPar
+  let pushRbp    = 4
+  let align      = if ((localSize + (p-8) + pushRbp) `mod` 8 == 0 )     
+                    then                             o2
+                    else (Push (Lit Int) (LitInt 0)):o2
   let prep       = if (localSize > 0)
-                    then (Add Minus (Lit Int) (X86 RSP) (LitInt (toInteger $ localSize))):o2
-                    else                                                                  o2
+                    then (Add Minus (Lit Int) (X86 RSP) (LitInt (toInteger $ localSize))):align
+                    else                                                                  align
   modify $ \st -> st { output = reverse (o1++prep)}
 
 
