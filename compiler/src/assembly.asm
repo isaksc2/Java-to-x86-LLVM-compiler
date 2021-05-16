@@ -15,22 +15,24 @@ f:
 	push rbp
 	mov rbp, rsp
 	mov rcx, 3
-	mov ________r1, 3
-	push ________r0
+	mov rdx, 3
+	push rcx
 	call printInt
 	add 4, rsp
 	push [rbp + 12]
 	call printInt
 	add 4, rsp
-	mov ________r2, 30
-	push ________r2
+	push rdx
+	call printInt
+	add 4, rsp
+	mov rcx, 30
+	push rcx
 	call printInt
 	add 4, rsp
 	mov rax, 0
 	mov rsp, rbp
 	pop rbp
 	ret
-	; [[True,True,True],[True,True,True],[True,True,True],[True,True,True],[True,False,True],[False,False,True],[False,False,True],[False,False,True],[False,False,True],[False,False,True],[False,False,True],[False,False,True],[False,False,False],[False,False,False],[False,False,False],[False,False,False],[False,False,False],[False,False,False]]
 
 
 main:
@@ -46,7 +48,7 @@ L3:
 	mov rax, 0
 	jmp L4
 L4:
-	cmp  ________r0, 1
+	cmp  rcx, 1
 	jeq L0
 	jmp L1
 L0:
@@ -65,4 +67,3 @@ L1:
 	mov rsp, rbp
 	pop rbp
 	ret
-	; [[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[True],[True],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False]]

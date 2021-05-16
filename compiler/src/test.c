@@ -3,6 +3,7 @@ int f(int b, int a) {
   int d = 3;
   printInt(c);
   printInt(a);
+  printInt(d);
   int h = 30;
   printInt(h);
   return 0 ;

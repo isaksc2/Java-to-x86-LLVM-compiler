@@ -563,10 +563,11 @@ registerAlloc = do
   -- calculate liveness
   li             <- liveness (d, iu, s)
   ld             <- liveness (d, du, s)
-  emit $ Comment (show li)
+  --emit $ Comment (show ld)
   --emit $ Comment (show li)
   -- get interference graph
   let ii         = interference li
+
   --emit $ Comment (show ii)
   let id         = interference ld
   -- real registers
@@ -614,7 +615,7 @@ defUseSucc = do
   n_label                <- gets nextLabel
   n_reg                  <- gets nextReg
   defs'                  <- defs
-  uses                   <- mapM use  (reverse o)
+  uses                   <- mapM (\(code, def') -> use code def') (zip (reverse o) defs')
   let (intUses, doubUses) = unzip uses
   succs                  <- mapM succSet (zip (reverse o ) [0..])
   --return zip3 defs' uses succs
@@ -698,8 +699,8 @@ defUseSucc = do
           return $ fromJust $ elemIndex (Label l'') o
 
     -- get use set for a line of code, first set is ints, the second is doubles
-    use :: Code -> Compile ([Bool], [Bool])
-    use x = case x of
+    use :: Code -> [Bool] -> Compile ([Bool], [Bool])
+    use x defines = case x of
       (Add _  t v1   v2) -> combine t v1 v2
       (Mul _  t v1   v2) -> combine t v1 v2
       (Mov    t v1   v2) -> combine t v1 v2
@@ -723,7 +724,10 @@ defUseSucc = do
           useV :: Value -> Compile [Bool]
           useV (Reg r) = do 
             (R n) <- gets nextReg
-            return $ replaceNth (theRegister r) True (bitArray n)
+            -- dont add to use set if its also defined here
+            if (getElem (theRegister r) defines)
+              then return (bitArray n)
+              else return $ replaceNth (theRegister r) True (bitArray n)
           useV _       = do
             (R n) <- gets nextReg
             return $ bitArray n
@@ -754,6 +758,7 @@ liveness dus = do
     -- iterate until livein doesnt change
     iterate :: ([[Bool]], [[Bool]], [[Bool]]) -> [[Bool]] -> [[Bool]]
     iterate (defs, uses, succs) livein' = do -- (d, u, s):ds)
+      --error (show defs)
       let livein'' = iterateLine 0 livein'
       --error (show livein'')
       --return uses
@@ -776,8 +781,14 @@ liveness dus = do
         let out       = liveSucc (getElem i succs) livein'''
         -- successors "-" def set
         let s_minus_d = bitMinus out (getElem i defs)
+        --if(getElem 2 out)
+         -- then error $ (show s_minus_d ++  "\n" ++ show (getElem i defs) ++  "\n" ++  show livein''' ++ show i)
+          --else return ()
         -- livein for this iteration
         let line  = bitOr (getElem i uses) s_minus_d
+        --if(line == [True,True,True])
+          --then error $ (show livein''' ++ show i)
+          --else return ()
         let livein'''' =  replaceNth i line livein'''
         iterateLine (i+1) livein''''
         where
@@ -825,7 +836,8 @@ interference livein = do
 kColor :: [[Bool]] -> Int -> Compile ([Int], [Int], [[Bool]])
 kColor matrix k = do
   let n_regs            = length matrix
-  let stack             = repeatAlg matrix n_regs
+  let stack             = repeatAlg matrix n_regs (take n_regs (repeat False))
+  --emit $ Comment (show stack)
   let (stack', matrix', spill) = removeSpill stack matrix
   -- an empty k-bit-map representation of color choice for each register
   let colors            = take n_regs (repeat (take k (repeat False)))
@@ -883,14 +895,19 @@ kColor matrix k = do
 
     -- find node and delete it until k nodes left or fal
     -- arguemtns are the graph, nbr of remaining nodes and the node stack
-    repeatAlg :: [[Bool]] -> Int -> [(Int, Bool)]
-    repeatAlg m r = do
+    repeatAlg :: [[Bool]] -> Int -> [Bool] -> [(Int, Bool)]
+    repeatAlg m r deleted = do
       if (r == 0) -- todo <= k
         then []
         else do
-          let (m', n, _) = findN m (-1)
-          let r' = r - 1
-          let stack' = repeatAlg m' r'
+          -- find node n and delete edges to get new graph m'
+          let (m', n, _) = findN m (-1) deleted
+          let deleted' = replaceNth (fst n) True deleted
+          -- number of nodes left -1
+          let r' = r - 1 -- todo r redundant with deleted
+          -- get the rest of the nodes
+          let stack' = repeatAlg m' r' deleted'
+          -- combine results
           (n:stack')
     -- find node n with <k egdges, also delete edges
     -- spill node with most interference
@@ -899,13 +916,16 @@ kColor matrix k = do
     -- graph with deleted edges, 
     -- the edge with a spill flag and 
     -- degree of node we need to spill
-    findN :: [[Bool]] -> Int -> ([[Bool]], (Int, Bool), Maybe Int)
-    findN []     degree = ([], (-1, False), Just degree)
-    findN (b:bs) degree = do
+    findN :: [[Bool]] -> Int -> [Bool] -> ([[Bool]], (Int, Bool), Maybe Int)
+    -- look for node to spill
+    findN []     degree _ = ([], (-1, False), Just degree)
+    -- look for node with <k edges
+    findN (b:bs) degree deleted''= do
       let degree' = boolSum b
       let index   = (length matrix) - (length bs) - 1
+      let del = isDeleted bs deleted''
       -- if degree' < k, delete this node, otherwise check the next node
-      if (degree' < k)
+      if (degree' < k && not del)
         then do
           let matrix'' = deleteNode index matrix
           (matrix'', (index, False), Nothing)
@@ -915,7 +935,7 @@ kColor matrix k = do
                           then degree'
                           else degree
           -- try delete other node
-          let (matrix''', (b', flag), degree''') = findN bs degree''
+          let (matrix''', (b', flag), degree''') = findN bs degree'' deleted''
           -- if we deleted, then return, else see if we should spill the current node
           if (isNothing degree''') -- todo maybe entire result use when?
             then (matrix''', (b', flag), degree''')
@@ -926,7 +946,7 @@ kColor matrix k = do
                   let matrix'''' = deleteNode index matrix
                   (matrix'''', (index, True), Nothing)
                 -- ask previous node to spill
-                -- dont actually care about any value other than degre''' in this case
+                -- dont actually care about any value other than degree''' in this case
                 else (matrix''', (b', flag), degree''')
     -- delete node at given index
     deleteNode :: Int -> [[Bool]] -> [[Bool]]
@@ -936,6 +956,14 @@ kColor matrix k = do
       -- remove edges from n
       let m'' = replaceNth index' (take (length m') (repeat False)) m'
       m''
+
+    
+    -- see if node (specified by the remaining nodes rest) has been deleted
+    isDeleted :: [a] -> [Bool] -> Bool
+    isDeleted rest deleted''' = do
+      let node = (length matrix) - (length rest) - 1
+      getElem node deleted'''
+
     
 
 
@@ -972,8 +1000,14 @@ registerOutput realRegs tempRegs colorMap = do
               -- update 1 line of code
               updateCode :: Code -> Register -> Code
               updateCode x r = case x of
-                (Mov t v1 v2) -> (Mov t (swap v1 r) (swap v2 r))
-                (Pop t     v) -> (Pop t (swap v  r))
+                (Mov    t v1 v2) -> (Mov    t (swap v1 r) (swap v2 r))
+                (Add op t v1 v2) -> (Add op t (swap v1 r) (swap v2 r))
+                (Mul op t v1 v2) -> (Mul op t (swap v1 r) (swap v2 r))
+                (Cmp    t v1 v2) -> (Cmp    t (swap v1 r) (swap v2 r))
+                (Pop    t     v) -> (Pop    t (swap v  r))
+                (Push   t     v) -> (Push   t (swap v  r))
+                (IncDec op    v) -> (IncDec op (swap v  r))
+                (CNeg         v) -> (CNeg     (swap v  r))
                 c -> c
               -- todo implement the rest
                 where
