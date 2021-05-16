@@ -14,14 +14,23 @@ segment .text
 f:
 	push rbp
 	mov rbp, rsp
-	push param 12
+	mov rcx, 3
+	mov ________r1, 3
+	push ________r0
+	call printInt
+	add 4, rsp
+	push [rbp + 12]
+	call printInt
+	add 4, rsp
+	mov ________r2, 30
+	push ________r2
 	call printInt
 	add 4, rsp
 	mov rax, 0
 	mov rsp, rbp
 	pop rbp
 	ret
-	; [[],[],[],[],[],[],[],[],[]]
+	; [[True,True,True],[True,True,True],[True,True,True],[True,True,True],[True,False,True],[False,False,True],[False,False,True],[False,False,True],[False,False,True],[False,False,True],[False,False,True],[False,False,True],[False,False,False],[False,False,False],[False,False,False],[False,False,False],[False,False,False],[False,False,False]]
 
 
 main:
@@ -56,4 +65,4 @@ L1:
 	mov rsp, rbp
 	pop rbp
 	ret
-	; [[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[],[]]
+	; [[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[True],[True],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False],[False]]

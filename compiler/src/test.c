@@ -1,5 +1,10 @@
 int f(int b, int a) {
+  int c = 3;
+  int d = 3;
+  printInt(c);
   printInt(a);
+  int h = 30;
+  printInt(h);
   return 0 ;
 
 }

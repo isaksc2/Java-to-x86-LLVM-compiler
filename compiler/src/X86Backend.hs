@@ -409,8 +409,9 @@ instance ToLLVM Value where
     LitString s   -> error $ "can only print adress to string, not string directly"
     Reg r         -> toLLVM r
     Glob g        -> toLLVM g 
+    X86 (Stack n) -> "[rbp - " ++ show n ++ "]"
+    X86 (Param n) -> "[rbp + " ++ show n ++ "]"
     X86 reg       -> (map (\c -> toLower c) (show reg))
-    X86 (Stack n) -> "[rbp -" ++ show n ++ "]"
     -- todo arguments + 8 + 12 +16...
     
 instance ToLLVM Register where
@@ -514,7 +515,10 @@ bitAnd a b = map (\(c,d) -> c && d) (zip a b)
 
 -- bitwise or
 bitOr :: [Bool] -> [Bool] -> [Bool]
-bitOr a b = map (\(c,d) -> c || d) (zip a b)
+bitOr a b = do
+  if (False && length a /= length b)
+    then error (show a ++ show b)
+    else map (\(c,d) -> c || d) (zip a b)
 
 -- bitwise xor
 bitXor :: [Bool] -> [Bool] -> [Bool]
@@ -554,14 +558,16 @@ registerAlloc :: Compile ()
 registerAlloc = do
   -- get def, use and succ sets
   (d, iu, du, s) <- defUseSucc
-  --error (show d)
+  --emit $ Comment (show iu)
   --error ("_____" ++ (show d ))
   -- calculate liveness
   li             <- liveness (d, iu, s)
   ld             <- liveness (d, du, s)
   emit $ Comment (show li)
+  --emit $ Comment (show li)
   -- get interference graph
   let ii         = interference li
+  --emit $ Comment (show ii)
   let id         = interference ld
   -- real registers
   let iRegs       = [RCX, RDX, RBX, RDI, RSI, R8, R9, R10, R11, R12, R13, R14, R15]
@@ -571,6 +577,7 @@ registerAlloc = do
   let kd          = length dRegs
   -- k color to get real-reg and stack-var partitions + color for each real-reg
   (ri, si, ci)   <- kColor ii ki
+  --emit $ Comment (show ri)
   (rd, sd, cd)   <- kColor id kd
   -- update code with real-regs
   registerOutput iRegs ri ci
@@ -609,7 +616,7 @@ defUseSucc = do
   defs'                  <- defs
   uses                   <- mapM use  (reverse o)
   let (intUses, doubUses) = unzip uses
-  succs                  <- mapM succSet (reverse o)
+  succs                  <- mapM succSet (zip (reverse o ) [0..])
   --return zip3 defs' uses succs
   return (defs', intUses, doubUses, succs)
   where
@@ -662,12 +669,19 @@ defUseSucc = do
 
     
     -- get succ set for a line of code
-    succSet :: Code -> Compile [Bool]
-    succSet (Branch l)           = succL l -- todo first label was f:, and is defined outside this scope, do i need to care about he first one? u cant jump to it
-    succSet (BranchCond _ l) = succL l
-    succSet _                    = do
+    succSet :: (Code, Int) -> Compile [Bool] -- todo line after should be succ by default
+    succSet ((Branch l), _)           = succL l -- todo first label was f:, and is defined outside this scope, do i need to care about he first one? u cant jump to it
+    succSet ((BranchCond _ l), index) = do 
+      lab <- succL l
       o   <- gets output
-      return $ bitArray $ length o -- todo: need to add 1 extra elem for f:? no cause its not in output ig?
+      let next = replaceNth (index+1) True (bitArray (length o))
+      return $ bitOr lab next
+    succSet (_, index)                    = do
+      o   <- gets output
+      let none = bitArray $ length o -- todo: need to add 1 extra elem for f:? no cause its not in output ig?
+      if (index + 1 < length o)
+        then return $ replaceNth (index+1) True none
+        else return none
 
     -- get successors of 1 label
     succL :: Label -> Compile [Bool]
@@ -736,31 +750,49 @@ liveness dus = do
   return $ iterate dus livein
   where -- todo should take [[Bool]]
 
+
     -- iterate until livein doesnt change
     iterate :: ([[Bool]], [[Bool]], [[Bool]]) -> [[Bool]] -> [[Bool]]
     iterate (defs, uses, succs) livein' = do -- (d, u, s):ds)
-      -- out set for every line
-      let out       = map (\s' -> liveSucc s' livein') succs
-      -- successors "-" def set
-      let s_minus_d = map (\(o, d) -> bitMinus o d) (zip out defs)
-      -- livein for this iteration
-      --error (show defs)
-      let livein''  = map (\(u, smd) -> bitOr u smd) (zip uses s_minus_d)
+      let livein'' = iterateLine 0 livein'
+      --error (show livein'')
       --return uses
       -- repeat if not done
       if (livein' == livein'')
-        then livein''
-        else iterate (defs, uses, succs) livein''
+        then do 
+          --error (show livein'')
+          -- could be double
+          --error (show uses ++ "\n\n" ++ show (length livein') ++ show (length livein'') ++  "\n" ++ show livein'' ++ "\n\n" ++ show livein')
+          livein''
+        else do 
+          --error (show (length livein') ++ show (length livein'') ++  "\n" ++ show livein'' ++ "\n\n" ++ show livein')
+          iterate (defs, uses, succs) livein''
       where
+        --update 1 line according to algorithm
+        iterateLine :: Int -> [[Bool]] -> [[Bool]]
+        iterateLine i livein''' | i == length livein''' = livein'''
+        iterateLine i livein''' = do
+        -- out set for 1 line
+        let out       = liveSucc (getElem i succs) livein'''
+        -- successors "-" def set
+        let s_minus_d = bitMinus out (getElem i defs)
+        -- livein for this iteration
+        let line  = bitOr (getElem i uses) s_minus_d
+        let livein'''' =  replaceNth i line livein'''
+        iterateLine (i+1) livein''''
+        where
 
-        -- get livein of successors
-        liveSucc :: [Bool] -> [[Bool]] -> [Bool]
-        liveSucc []      _     = []
-        liveSucc (s:ss) (l:ls) = do
-          let l'  = if (s)
-                      then l 
-                      else take (length l) (repeat False)
-          bitOr l' (liveSucc ss ls)
+          -- get livein of successors
+          liveSucc :: [Bool] -> [[Bool]] -> [Bool]
+          liveSucc []      _     = take (length (head succs)) (repeat False)
+          liveSucc (s:ss) (l:ls) = do
+            let l'  = if (s)
+                        then do
+
+                          --error (show l)
+                          l 
+                        else take (length l) (repeat False) --- here todo omegalul
+            bitOr l' (liveSucc ss ls)
 
 
 -- do something with output
