@@ -9,96 +9,105 @@ segment .text
 	global main
 
 main:
-	push  rbp
+	push    rbp
 	mov   rbp, rsp
-	mov   rcx, 17    ; 17
-	mov   rbx, rcx   ; y = 17
-	jmp   L0
-L0:
-	mov   rcx, 0    ; y > 0 ?
-	mov   rax, rbx
-	cmp   rax, rcx
-	ja    L3
-	jmp   L4
-L3:
-	mov   rax, 1    ; true
-	jmp   L5
-L4:
-	mov   rax, 0    ; false
-	jmp   L5
-L5:
-	cmp   rax, 1    ; true?
-	je    L1		; goto while
-	jmp   L2		; else skip while
-L1:					
-	mov   rcx, 2    ; y = y-2
-	mov   rax, rbx
-	sub   rax, rcx
-	mov   rbx, rax
-	jmp   L0
-L2:
-	mov   rcx, 0     ; y < 0 ?
-	mov   rax, rbx
-	cmp   rax, rcx
-	jb    L6
-	jmp   L7
-L6:
-	mov   rax, 1     : true
-	jmp   L8
-L7:
-	mov   rax, 0     ; false
-	jmp   L8
-L8:
-	cmp   rax, 1    ; true?
-	je    L9        ; goto if
-	jmp   L10		; goto else
-L9:
-	mov   rcx, 0    ; "push" 0 as argument to printInt
-	mov   rdi, rcx
-								push    rsi		; "save" registers
-								push    rdx
-								push    rcx
-								push    r8
-								push    r9
-								push    r10
-								push    r11
-								push    r11
-	call  printInt  ; print
-								pop     r11     ; "restore" registers
-								pop     r11
-								pop     r10
-								pop     r9
-								pop     r8
-								pop     rcx
-								pop     rdx
-								pop     rsi
-	mov   rcx, 0    ; return 0
-	mov   rax, rcx
+	sub   rsp, 48
+	mov   rsi, 1
+	mov   r8, rsi
+	mov   rsi, 2
+	mov   r9, rsi
+	mov   rsi, 3
+	mov   r10, rsi
+	mov   rsi, 4
+	mov   r11, rsi
+	mov   rsi, 5
+	mov   r12, rsi
+	mov   rsi, 6
+	mov   r13, rsi
+	mov   rsi, 7
+	mov   r14, rsi
+	mov   rsi, 8
+	mov   r15, rsi
+	mov   rsi, 9
+	mov   [rbp - 8], rsi
+	mov   rsi, 10
+	mov   [rbp - 16], rsi
+	mov   rsi, 11
+	mov   [rbp - 24], rsi
+	mov   rsi, 12
+	mov   [rbp - 32], rsi
+	mov   rax, __?float64?__(1.0)
+	movq  xmm2, rax
+	movsd xmm3, xmm2
+	mov   rax, __?float64?__(2.0)
+	movq  xmm2, rax
+	movsd xmm4, xmm2
+	mov   rax, __?float64?__(3.0)
+	movq  xmm2, rax
+	movsd xmm5, xmm2
+	mov   rax, __?float64?__(4.0)
+	movq  xmm2, rax
+	movsd xmm6, xmm2
+	mov   rax, __?float64?__(5.0)
+	movq  xmm2, rax
+	movsd xmm7, xmm2
+	mov   rax, __?float64?__(6.0)
+	movq  xmm2, rax
+	movsd xmm8, xmm2
+	mov   rax, __?float64?__(7.0)
+	movq  xmm2, rax
+	movsd xmm9, xmm2
+	mov   rax, __?float64?__(8.0)
+	movq  xmm2, rax
+	movsd xmm10, xmm2
+	mov   rax, __?float64?__(9.0)
+	movq  xmm2, rax
+	movsd xmm11, xmm2
+	mov   rax, __?float64?__(10.0)
+	movq  xmm2, rax
+	movsd xmm12, xmm2
+	mov   rax, __?float64?__(11.0)
+	movq  xmm2, rax
+	movsd xmm13, xmm2
+	mov   rax, __?float64?__(12.0)
+	movq  xmm2, rax
+	movsd xmm15, xmm2
+	mov   rax, __?float64?__(13.0)
+	movq  xmm2, rax
+	movsd [rbp - 40], xmm2
+	mov   rax, __?float64?__(14.0)
+	movq  xmm2, rax
+	movsd [rbp - 48], xmm2
+	mov   rax, r8
+	add   rax, r9
+	add   rax, r10
+	add   rax, r11
+	add   rax, r12
+	add   rax, r13
+	add   rax, r14
+	add   rax, r15
+	add   rax, [rbp - 8]
+	add   rax, [rbp - 16]
+	add   rax, [rbp - 24]
+	add   rax, [rbp - 32]
+	mov   rsi, rax
+	movsd xmm0, xmm3
+	addsd xmm0, xmm4
+	addsd xmm0, xmm5
+	addsd xmm0, xmm6
+	addsd xmm0, xmm7
+	addsd xmm0, xmm8
+	addsd xmm0, xmm9
+	addsd xmm0, xmm10
+	addsd xmm0, xmm11
+	addsd xmm0, xmm12
+	addsd xmm0, xmm13
+	addsd xmm0, xmm15
+	addsd xmm0, [rbp - 40]
+	addsd xmm0, [rbp - 48]
+	movsd xmm2, xmm0
+	mov   rsi, 0
+	mov   rax, rsi
 	mov   rsp, rbp
-	pop   rbp
-	ret
-L10:
-	mov   rcx, 1    ; "push" 1 as argument to printInt 
-	mov   rdi, rcx
-								push    rsi		; "save" registers
-								push    rdx
-								push    rcx
-								push    r8
-								push    r9
-								push    r10
-								push    r11
-								push    r11
-	call  printInt   ; print
-								pop     r11	     ; "restore" registers
-								pop     r11
-								pop     r10
-								pop     r9
-								pop     r8
-								pop     rcx
-								pop     rdx
-								pop     rsi
-	mov   rcx, 0     ; return 0
-	mov   rax, rcx
-	mov   rsp, rbp
-	pop   rbp
+	pop     rbp
 	ret
