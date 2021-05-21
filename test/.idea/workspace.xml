@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="BranchesTreeState">
+    <expand>
+      <path>
+        <item name="ROOT" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="LOCAL_ROOT" type="e8cecc67:BranchNodeDescriptor" />
+      </path>
+      <path>
+        <item name="ROOT" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="REMOTE_ROOT" type="e8cecc67:BranchNodeDescriptor" />
+      </path>
+      <path>
+        <item name="ROOT" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="REMOTE_ROOT" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="GROUP_NODE:origin" type="e8cecc67:BranchNodeDescriptor" />
+      </path>
+    </expand>
+    <select />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="a5fca9c8-1cfe-41f4-98c2-756fb42f3b46" name="Default Changelist" comment="">
+      <change beforePath="$PROJECT_DIR$/../compiler/src/Makefile" beforeDir="false" afterPath="$PROJECT_DIR$/../compiler/src/Makefile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../compiler/src/X86Backend.hi" beforeDir="false" afterPath="$PROJECT_DIR$/../compiler/src/X86Backend.hi" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../compiler/src/X86Backend.hs" beforeDir="false" afterPath="$PROJECT_DIR$/../compiler/src/X86Backend.hs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../compiler/src/X86Backend.o" beforeDir="false" afterPath="$PROJECT_DIR$/../compiler/src/X86Backend.o" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../compiler/src/assembly.asm" beforeDir="false" afterPath="$PROJECT_DIR$/../compiler/src/assembly.asm" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../compiler/src/c.c" beforeDir="false" afterPath="$PROJECT_DIR$/../compiler/src/c.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../compiler/src/c.o" beforeDir="false" afterPath="$PROJECT_DIR$/../compiler/src/c.o" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../compiler/src/jlc.hi" beforeDir="false" afterPath="$PROJECT_DIR$/../compiler/src/jlc.hi" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../compiler/src/jlc.hs" beforeDir="false" afterPath="$PROJECT_DIR$/../compiler/src/jlc.hs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../compiler/src/jlc.o" beforeDir="false" afterPath="$PROJECT_DIR$/../compiler/src/jlc.o" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../compiler/src/test.c" beforeDir="false" afterPath="$PROJECT_DIR$/../compiler/src/test.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Docker/partA-1.tar.gz" beforeDir="false" afterPath="$PROJECT_DIR$/Docker/partA-1.tar.gz" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Docker/partC-1.tar.gz" beforeDir="false" afterPath="$PROJECT_DIR$/Docker/partC-1.tar.gz" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/testing.py" beforeDir="false" afterPath="$PROJECT_DIR$/testing.py" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/.." />
+  </component>
+  <component name="ProjectId" id="1shiGMdEH5VBrNzTzkxp4FdLYY2" />
+  <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">
+    <property name="RunOnceActivity.OpenProjectViewOnStart" value="true" />
+    <property name="WebServerToolWindowFactoryState" value="false" />
+    <property name="aspect.path.notification.shown" value="true" />
+  </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="a5fca9c8-1cfe-41f4-98c2-756fb42f3b46" name="Default Changelist" comment="" />
+      <created>1621331127426</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1621331127426</updated>
+      <workItem from="1621331128643" duration="29000" />
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>

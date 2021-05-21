@@ -15,7 +15,7 @@ files=jlc.hs Javalette.cf Makefile TypeChecker.hs LlvmBackend.hs X86Backend.hs
 # The extra dependency Javalette/Test ensures that the parser is built from Javalette.cf
 
 jlc_x64 : $(files) Javalette/Test
-	ghc --make jlc.hs -o jlc_x64 
+	ghc --make jlc.hs -o jlc_x64
 
 # todo jlc
 

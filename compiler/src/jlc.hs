@@ -19,8 +19,10 @@ import X86Backend
 main :: IO ExitCode
 main = do
   --program <- hGetContents stdin
-  --program <- readFile "test.c"
-  program <- readFile "../../test/testsuite/good/core031.jl"
+  --program <- readFile "data/core016.jl"
+  program <- readFile "testsuite/good/core002.jl"
+  --program <- readFile "../../test/testsuite/good/core016.jl"
+  --program <- readFile "10.jl"
   check program
   --check "int main() { if (true == true) {printInt(42);} return 0;}"
 
@@ -46,6 +48,6 @@ llvm :: Prog -> IO ExitCode
 llvm p = do
   let code = compile p
   --writeFile "main.ll" code -- file for debugging
-  writeFile "assembly.asm" code -- file for debugging
+  writeFile "foo.s" code -- file for debugging
   putStrLn code
   exitSuccess

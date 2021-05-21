@@ -3,6 +3,7 @@ int main() {
     int x;
     x++;
     printInt(x);
+    printInt(y);
     x--;
     printInt(x);
     x--;
