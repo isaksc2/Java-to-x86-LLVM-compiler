@@ -104,8 +104,6 @@ data St = St
   , globalOut    :: Output
   , globals      :: Block
   , nextGlobal   :: GlobalRegister
-  , regSize      :: Map Int Integer -- todo still needed?
-  , parSize      :: Map Int Integer
   }
 
 -- initial state
@@ -120,8 +118,6 @@ initSt s = St { sig          = s
               , globalOut    = []
               , globals      = []
               , nextGlobal   = G 0
-              , regSize      = Map.empty
-              , parSize      = Map.empty
               }
 
 builtin :: [(Ident, FunHead)]
@@ -134,7 +130,7 @@ builtin =
   ]
 
 
-data LLVMType = Lit Type | Ptr LLVMType
+data LLVMType = Lit Type
   deriving(Show, Eq)
 
 -- convert function to a slightly different type.
@@ -274,8 +270,6 @@ newRegister :: LLVMType -> Compile Register
 newRegister t = do
   v <- gets nextReg
   modify $ \st -> st { nextReg = succ v }
-  rs <- gets regSize
-  modify $ \st -> st { regSize = Map.insert (theRegister v) (size t) rs }
   return v
 
 
@@ -284,13 +278,10 @@ newParam :: LLVMType -> Compile Param
 newParam t = do
   (P v) <- gets nextPar
   modify $ \st -> st { nextPar = (P (v + fromIntegral (size t))) }
-  rs <- gets parSize
-  modify $ \st -> st { parSize = Map.insert v (size t) rs }
   return (P v)
 
 -- calculate register size
 size :: LLVMType -> Integer
-size (Ptr _) = 8
 size (Lit Doub) = 8
 size (Lit _) = 8
 
@@ -355,7 +346,6 @@ class ToLLVM a where
 
 instance ToLLVM LLVMType where
   toLLVM = \case
-    Ptr ptr -> toLLVM ptr ++ "*" 
     Lit lit -> toLLVM lit
 
 instance ToLLVM Type where
@@ -581,18 +571,16 @@ getElem i l = last $ take (i+1) l
 -- "main" function for register allocation optimization
 registerAlloc :: Compile ()
 registerAlloc = do
+  --------------------------------- perform register allocation ------------------------------
   -- get def, use and succ sets
   (d, iu, du, s) <- defUseSucc
+  --error (show $ map (\x -> map (\(b,i) -> if (b) then show i ++ show i else "") (zip x [0..])) du)
   -- calculate liveness
   li             <- liveness (d, iu, s)
-  --error (show $ map (\x -> map (\(b,i) -> if (b) then show i ++ show i else "") (zip x [0..])) du)
   ld             <- liveness (d, du, s)
   -- todo : only the second liveness is slow
   -- get interference graph
   let ii         = interference li
-  --error (show $ map (\x -> map (\(b,i) -> if (b) then show i ++ " @@@" else "") (zip x [0..])) ii)
-
-  --emit $ Comment (show ii)
   let id         = interference ld
   -- real registers
   let iRegs       = [RSI, R8, R9, R10, R11, R12, R13, R14, R15] -- rdi rax rbx rcx
@@ -602,33 +590,29 @@ registerAlloc = do
   let kd          = length dRegs
   -- k color to get real-reg and stack-var partitions + color for each real-reg
   (ri, si, ci)   <- kColor ii ki
-  --error (show si)
-  --error (show $ map (\x -> map (\(b,i) -> if (b) then show i ++ show i else "") (zip x [0..])) ci)
-  --emit $ Comment (show ri)
   (rd, sd, cd)   <- kColor id kd
   -- update code with real-regs
   registerOutput (Lit Int)  iRegs ri ci
-  --o'' <- gets output
-  --emit $ Comment (show $ map toLLVM o'')
   registerOutput (Lit Doub) dRegs rd cd
   -- space needed for spilled stack variables 
   let  intLocals  = 8*(length si)
   let doubLocals  = 8*(length sd)
   -- local var locations
   let iStack      = map (\(_, y) -> Locals (y*8)) (zip si [1..]) -- todo fix offset
-  --error (show iStack)
   let dStack      = map (\(_, y) -> Locals (y*8 + intLocals)) (zip sd [1..]) -- todo fix offset
-  -- which memory location each spill register maps to
-  --let sli         = map (\(_, i) -> replaceNth i True (bitArray ki)) (zip si [0..])
+  -- make map that says which memory location each spill register maps to
   (R n_regs)     <- gets nextReg
   let sli         = makeSpillColorMap (length si) 0 n_regs si (take n_regs (repeat (bitArray (length si))))
   let sld         = makeSpillColorMap (length sd) 0 n_regs sd (take n_regs (repeat (bitArray (length sd))))
-  --error (show ri)
-  --let sld         = map (\(_, i) -> replaceNth i True (bitArray kd)) (zip sd [0..])
   -- update code with stack registers for spilled vars
   registerOutput (Lit Int)  iStack si sli
   registerOutput (Lit Doub) dStack sd sld
-  -- decrement RSP to make space for stack variables
+
+
+
+
+
+  --------------------- align stack if we created stack variables --------------------------
   o             <- gets output
   let (o1, o2)   = splitAt 2 (reverse o)
   let localSize  = intLocals + doubLocals
@@ -637,20 +621,30 @@ registerAlloc = do
   let pushRbp    = 8
   let returnAdr  = 8
   let aligned    = (localSize + (p-8) + pushRbp + returnAdr) `mod` 16 == 0
-  --error (show aligned ++ show localSize ++ show p)
   let align      = if (aligned)     
                     then                             o2
                     else  (Push (Lit Int) (X86 RCX)):o2
+
+
+
+
+
+  ------------------- decrement RSP to make space for stack variables ------------------
   -- make space for local variables
   let prep       = if (localSize > 0)
                     then (Add Minus (Lit Int) (X86 RSP) (LitInt (toInteger $ localSize))):align
                     else                                                                  align
   let o' = reverse (o1++prep)
-  -- pop RCX that was used to align before
+  -- pop RCX (if we had to align)
   let o'' = if (aligned)
               then o'
               else alignBeforeRet o'
   modify $ \st -> st { output = o''}
+
+
+
+
+
 
 
 
@@ -1539,7 +1533,7 @@ incDecr :: Ident -> AddOp -> Compile Bool
 incDecr i op = do
   (adr, t) <- lookupVar i
   -- adr'''   <- loadReg (Reg adr, t)
-  if (t == (Lit Int) || t == (Ptr (Lit Int)))
+  if (t == (Lit Int) )
     then do 
       emit $ IncDec op adr
       return False
@@ -1547,11 +1541,6 @@ incDecr i op = do
       emit $ Add op (Lit Doub) (LitDoub 1.0) adr
       return False
      
-
--- get inner type of pointer
-unwrap :: LLVMType -> LLVMType
-unwrap (Ptr t) = t
-unwrap (Lit t) = (Lit t)
 
 
 
@@ -1711,8 +1700,8 @@ compileExp e0 b = case e0 of
                     
                     else if (typ == Lit Doub)
                       then do -- "push" doub manually
-                        emit $ Mov typ prev (X86 (Stack 0))
                         emit $ Add Minus (Lit Int) (X86 RSP) (LitInt 8) -- todo right order? need 8 extra space for first one?
+                        emit $ Mov typ prev (X86 (Stack 0))
                       else emit $ Push typ prev) es
     --allArgs <- gets prevResult
     --args    <- mapM (\x -> loadReg x) (reverse $ take n_args allArgs)

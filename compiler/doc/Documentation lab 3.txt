@@ -1,0 +1,146 @@
+For lav 3/C I (tried) implementing a x86-64 backend with register allocation optimization
+
+The register allocation works correctly, which can be verified by compiling the src/10.jl.
+10.jl has many local variables so you can see that they first get allocated to "real" registers
+and then to the stack, for both ints and doubles. 
+The register allocation is very slow however, on my computer it can take 10 seconds to compile 10.jl.
+I probably need to use some different data structures;
+I use bitarrays to represent the def-, use-, succsessor- and livein-sets, and this becomes a bit problematic for
+the successor set for example; There can be 200+ lines of code, each line has a successor set with bool 200 elements
+So just from this we get 40 000 elements.
+
+I'm still failing some tests however (fail 12/36 good tests), they either print the wrong thing, or they never "halt".
+I'll make sure to fix this until the final deadline
+
+So you cant run the test suite as normal since it wont halt.
+if you want to test a specific test in the docker:
+    open jlc.hs
+    in main after line 20 in the do block, type for example: 
+        program <- readFile "testsuite/good/core014.jl"
+this will make every test use core14.jl as input, so you can only test 1 program at a time.
+
+But I can provide a list tests that fail here, if you just want to inspect the backend:
+    core001     no halt
+    core010     wrong print
+    core012     prints nothing
+    core013     no halt
+    core015     wrong print
+    core016     no halt
+    core017     no halt
+    core019     no halt
+    core029     no halt
+    core031     print infinitely
+    intarith4   wrong print
+    intarith5   no halt
+
+
+
+---------- x86Backend.hs structure:
+The structure is the same as the LLVM backend, apart from the new register optimization section.
+But I'll include a copy of the description of the borrowed LLVM backend structure at the bottom of this document. 
+Ill also include any relevant changes in each section from the last backend.
+
+LlvmBackend.hs compiles the llvm code. it has 6 main sections: 
+entry point
+types + state
+functions for interacting with the state
+functions for converting code to "llvm strings"
+functions for saving (emitting) code to the state
+helper functions for bit arrays ------------------------------ new
+register allocation functions   ------------------------------ new
+functions for compiling functions
+functions for compiling statements
+functions for compiling expressions
+
+
+
+
+
+---------------------- helper functions for bit arrays: ------------
+simple functions for creating bit arrays and performing operations like bitwise or
+
+
+
+
+--------------------- register allocation functions --------------------
+We first have the "main" function for register allocation that combines all sub-steps of the "algorithm".
+The main function itself is called inside the compileFun function after compiling each function.
+
+This is how the register allocation works on an abstract level:
+First we generate the code without register allocation and use new temporary registers for every calculcation.
+Then we run the register allocation optimization and swap the temporary registers with real registers or a "stack location".
+We also have to do "sub RSP 8*x" where x is the number of variables we spill 
+Furthermore, we have to 128 bit align the stack (by pushing and popping RCX) if x is odd.
+
+The details of the register allocation follows the algorithm presented in the lectures.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+---------------------- entry point:
+the compile function compiles all functions, it appends imports, 
+strings constants and the functions themselves
+
+---------------------- types + state:
+we use a state monad that containts variable / register enums, 
+compiled code and function / variable signatures.
+We also have a "Code" data type that contains all relevant llvm 
+instruction templates.
+
+---------------------- functions for interacting with the state:
+we have methods for getting / fetching the "previous value". This lets use
+use the result from an instruction in the next one. We also have functions for 
+adding / getting variables, registers and labels.
+
+---------------------- functions for converting code to "llvm strings":
+these functions convert our "llvm instruction templates" to strings
+
+---------------------- functions for saving (emitting) code to the state:
+these functions take a llvm instruction template, turns it into a string and 
+puts it in the state.
+
+---------------------- functions for compiling functions:
+given a function, we compile its header and its statements.
+I'm a little unsatisfied with the use of "params" in the state and the
+helper function compileFun. Ideally you would merge compileFun and 
+compileDef to avoid needing the "params" variable in the state.
+The reason why it is this way is because I couldnt figure out how to
+perform execState / runState in such a way that I could return params
+from compileFun.
+
+---------------------- functions for compiling statements:
+given a statement, we compile it by emitting llvm instructions directly or 
+by calling the compileExp function. The compileStm function returns a bool
+that tells us if the statement guarantees a return. If it does, then we can
+omit the following statements, as mentioned before.
+
+---------------------- functions for compiling expressions:
+The compileExp function compiles expressions to llvm code. The function takes
+a bool argument that tells us if the expression is used as an operand or 
+argument for a different expression. If so, then we make sure that it is 
+not overridden by subsequent "arguments" by passing this bool to the
+setPrevVal function. This makes it so that we append the argument to the end
+of the list, rather than ovverriding the last element.

@@ -20,7 +20,7 @@ main :: IO ExitCode
 main = do
   --program <- hGetContents stdin
   --program <- readFile "data/core016.jl"
-  program <- readFile "testsuite/good/core031.jl"
+  program <- readFile "testsuite/good/core005.jl"
   --program <- readFile "../../test/testsuite/good/core031.jl"
   --program <- readFile "10.jl"
   check program
