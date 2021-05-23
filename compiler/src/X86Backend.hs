@@ -160,9 +160,9 @@ data Operator = Mo MulOp | Ao AddOp | Ro RelOp
 
 -- built in registers
 data X86Reg
-  = Stack Int | Param Int
+  = Locals Int | Param Int | Stack Int
   | RBP | RSP | RIP | RDI | RSI | RAX | RCX | RDX | RBX | R8 | R9 | R10 | R11 | R12 | R13 | R14 | R15
-  | XMM0 | XMM1 | XMM2 | XMM3 | XMM4 | XMM5 | XMM6 | XMM7 | XMM8 | XMM9 | XMM10 | XMM11 | XMM12 | XMM13 | XMM15 
+  | XMM0 | XMM1 | XMM2 | XMM3 | XMM4 | XMM5 | XMM6 | XMM7 | XMM8 | XMM9 | XMM10 | XMM11 | XMM12 | XMM13 | XMM14 | XMM15 
   deriving(Show, Eq)
 
 
@@ -188,6 +188,7 @@ data Code
   | Mov LLVMType Value Value
   | MovF         Value Value -- double literal to e.g RAX
   | MovF2        Value Value -- RAX to e.g XMM2
+  | MovF3        Value Value -- XMM to e.g RDI for printDouble
   | Pop LLVMType Value
   | Push LLVMType Value
   | IncDec AddOp Value
@@ -385,10 +386,10 @@ prefixRelOp (Lit Bool) op                         = prefixRelOp (Lit Int) op
 
 instance ToLLVM RelOp where
   toLLVM op = case op of
-    LTH   -> "b"
-    GTH   -> "a"
-    LE    -> "be"
-    GE    -> "ae"
+    LTH   -> "l"
+    GTH   -> "g"
+    LE    -> "le"
+    GE    -> "ge"
     EQU   -> "e"
     NE    -> "ne"
 
@@ -411,9 +412,11 @@ instance ToLLVM Value where
     LitString s   -> error $ "can only print adress to string, not string directly"
     Reg r         -> toLLVM r
     Glob g        -> toLLVM g 
-    X86 (Stack 0) -> "[rbp]"
-    X86 (Stack n) -> "[rbp - " ++ show n ++ "]"
-    X86 (Param n) -> "[rbp + " ++ show n ++ "]"
+    X86 (Locals 0) -> "[rbp]"
+    X86 (Locals n) -> "[rbp - " ++ show n ++ "]"
+    X86 (Stack  0) -> "[rsp]"
+    X86 (Stack  n) -> "[rsp - " ++ show n ++ "]"
+    X86 (Param  n) -> "[rbp + " ++ show n ++ "]"
     X86 reg       -> (map (\c -> toLower c) (show reg))
     
 instance ToLLVM Register where
@@ -438,12 +441,13 @@ instructionIncDec Minus = "dec"
 
 sizeKeyword :: LLVMType -> Value -> String
 sizeKeyword t x = case x of
-  (X86 (Stack n)) -> prefixT t ++  "word"
+  (X86 (Locals n)) -> prefixT t ++  "word"
   (X86 (Param n)) -> prefixT t ++  "word"
+  (X86 (Stack n)) -> prefixT t ++  "word"
   _               -> ""
   where
-    prefixT (Lit Doub) = "d"
-    prefixT _ = ""
+    prefixT (Lit Doub) = "q"
+    prefixT _ = "q"
 
 instance ToLLVM Code where
   toLLVM = \case
@@ -462,11 +466,17 @@ instance ToLLVM Code where
     DivI v                         -> "div   " ++ toLLVM v
     Mov t v1 v2 | t == (Lit Doub)  -> "movsd " ++ toLLVM v2 ++ ", " ++ toLLVM v1
                 | otherwise        -> "mov   " ++ toLLVM v2 ++ ", " ++ toLLVM v1
+    -- mov __?float62?__(x.y) to RAX
     MovF  v1 v2                    -> "mov   " ++ toLLVM v2 ++ ", " ++ toLLVM v1
+    -- mov RAX to xmm
+    MovF2 (X86 (Locals v1)) v2     -> "mov   " ++ toLLVM v2 ++ ", " ++ toLLVM (X86 (Locals v1))
+    MovF2 (X86 (Param  v1)) v2     -> "mov   " ++ toLLVM v2 ++ ", " ++ toLLVM (X86 (Param v1))
     MovF2 v1 v2                    -> "movq  " ++ toLLVM v2 ++ ", " ++ toLLVM v1
+    -- mov from xmm to e.g RDI
+    MovF3 v1 v2                    -> "movq  " ++ toLLVM v2 ++ ", " ++ toLLVM v1
     Pop t v                        -> "pop     " ++ toLLVM v
-    Push t v | t == Lit Doub       -> "push   "++ toLLVM v
-             | t == Lit String     -> "push word ["  ++ toLLVM v ++ "]"
+    Push t v | t == Lit Doub       -> "push   "++ toLLVM v -- todo not in use
+             | t == Lit String     -> "push qword ["  ++ toLLVM v ++ "]" -- todo used to be word
              | otherwise           -> "push   " ++ (sizeKeyword t v)  ++ " " ++ toLLVM v 
     IncDec op v                    -> instructionIncDec op ++ " " ++ toLLVM v
     CNeg v                         -> "neg  " ++ toLLVM v
@@ -573,17 +583,11 @@ registerAlloc :: Compile ()
 registerAlloc = do
   -- get def, use and succ sets
   (d, iu, du, s) <- defUseSucc
-  --error (show $ map (\x -> map (\(b,i) -> if (b) then show i ++ show i else "") (zip x [0..])) s)
-  --emit $ Comment (show iu)
-  --error (show iu)
-  --error (show $ map (\x -> map (\(b,i) -> if (b) then show i ++ " @@@" else "") (zip x [0..])) d)
-  --error (show $ map (\x -> map (\(b,i) -> if (b) then show i else "") (zip x [0..])) iu)
   -- calculate liveness
   li             <- liveness (d, iu, s)
+  --error (show $ map (\x -> map (\(b,i) -> if (b) then show i ++ show i else "") (zip x [0..])) du)
   ld             <- liveness (d, du, s)
-  --error (show $ map (\x -> map (\(b,i) -> if (b) then show i ++ show i ++ show i else "") (zip x [0..])) li)
-  --emit $ Comment (show ld)
-  --emit $ Comment (show li)
+  -- todo : only the second liveness is slow
   -- get interference graph
   let ii         = interference li
   --error (show $ map (\x -> map (\(b,i) -> if (b) then show i ++ " @@@" else "") (zip x [0..])) ii)
@@ -592,7 +596,7 @@ registerAlloc = do
   let id         = interference ld
   -- real registers
   let iRegs       = [RSI, R8, R9, R10, R11, R12, R13, R14, R15] -- rdi rax rbx rcx
-  let dRegs       = [XMM2, XMM3, XMM4, XMM5, XMM6, XMM7, XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM15]
+  let dRegs       = [XMM2, XMM3, XMM4, XMM5, XMM6, XMM7, XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15]
   -- nbr of real-regs
   let ki          = length iRegs
   let kd          = length dRegs
@@ -611,9 +615,9 @@ registerAlloc = do
   let  intLocals  = 8*(length si)
   let doubLocals  = 8*(length sd)
   -- local var locations
-  let iStack      = map (\(_, y) -> Stack (y*8)) (zip si [1..]) -- todo fix offset
+  let iStack      = map (\(_, y) -> Locals (y*8)) (zip si [1..]) -- todo fix offset
   --error (show iStack)
-  let dStack      = map (\(_, y) -> Stack (y*8 + intLocals)) (zip sd [1..]) -- todo fix offset
+  let dStack      = map (\(_, y) -> Locals (y*8 + intLocals)) (zip sd [1..]) -- todo fix offset
   -- which memory location each spill register maps to
   --let sli         = map (\(_, i) -> replaceNth i True (bitArray ki)) (zip si [0..])
   (R n_regs)     <- gets nextReg
@@ -812,6 +816,7 @@ defUseSucc = do
       (DivD     v1   v2) -> combine (Lit Doub) v1 v2
       (DivI     v      ) -> combine (Lit Int)  v  (LitInt (-1)) -- -1 is dummy value
       (MovF2     _   v2) -> combine (Lit Doub) v2 (LitDoub (-1.0))
+      (MovF3    v1    _) -> combine (Lit Doub) v1 (LitDoub (-1.0))
       (Pop    t       v) -> combine t          v  (LitInt (-1)) 
       (Push   t       v) -> combine t          v  (LitInt (-1)) 
       (IncDec _       v) -> combine (Lit Int)  v  (LitInt (-1)) 
@@ -868,8 +873,10 @@ liveness
   -> Compile [[Bool]]               -- liveness for each line
 liveness dus = do
   o           <- gets output
+  --if(head o == Comment "") then error (show "asdad") else return ()
   let n_ins    = length o
   (R n_regs)  <- gets nextReg
+  --let n_regs = toInteger 14
   -- 1 list for each code line, each list has 1 bool for each reg
   let livein   = take n_ins (repeat (take (fromIntegral n_regs) (repeat False)))
   -- get livein sets
@@ -1166,7 +1173,7 @@ registerOutput typ realRegs tempRegs colorMap = do
           (s, (c:cc)) -> do
             let c'  = updateCode c (R s)
             let cc' = traverseCode (s, cc)
-            --if (head realRegs == Stack 8 && c' == Return)
+            --if (head realRegs == Locals 8 && c' == Return)
               --then error (show s ++ show cc')
               --else return ()
             (c':cc')
@@ -1182,7 +1189,8 @@ registerOutput typ realRegs tempRegs colorMap = do
                 (Add op t v1 v2) -> (Add op t  (swap t          v1 r) (swap t v2 r))
                 (Mul op t v1 v2) -> (Mul op t  (swap t          v1 r) (swap t v2 r))
                 (Cmp    t v1 v2) -> (Cmp    t  (swap t          v1 r) (swap t v2 r))
-                (MovF2    v1 v2) -> (MovF2     v1                      (swap (Lit Doub) v2 r))
+                (MovF2    v1 v2) -> (MovF2     v1                     (swap (Lit Doub) v2 r))
+                (MovF3    v1 v2) -> (MovF3     (swap (Lit Doub) v1 r) v2)
                 (DivD     v1 v2) -> (DivD      (swap (Lit Doub) v1 r) (swap (Lit Doub) v2 r))
                 (DivI     v    ) -> (DivI      (swap (Lit Int)  v  r)) 
                 (Pop    t     v) -> (Pop    t  (swap t          v  r))
@@ -1279,7 +1287,7 @@ compileFun (Ident f) t0 args ss = do
   -- make a new variable and alloc memory for each parameter:
   regs <- mapM (\(Argument t' x) -> do
                                         (P r') <- newParam (Lit t')
-                                        newVar x (X86 (Param r')) (Ptr (Lit t'))
+                                        newVar x (X86 (Param r'))  (Lit t')
                                         return (P r')
                                       ) args
   -- push registers
@@ -1321,7 +1329,7 @@ compileDecl t (Init id (ETyped e _)) = do
   -- compile expression and make new variable
   compileExp (ETyped e t) False
   r <- newRegister (Lit t)
-  newVar id (Reg r) (Ptr (Lit t))
+  newVar id (Reg r) (Lit t)
   (p, t')  <- getPrevResult
   -- p' <- loadReg p
   emit $ Mov (Lit t) p (Reg r)
@@ -1329,7 +1337,7 @@ compileDecl t (Init id (ETyped e _)) = do
 compileDecl t (NoInit id) = do
   -- just create new variable
   r <- newRegister (Lit t)
-  newVar id (Reg r) (Ptr (Lit t))
+  newVar id (Reg r) (Lit t)
   default0 r t
   where
 
@@ -1565,7 +1573,9 @@ emitBinaryOp :: Type -> Operator -> Expr -> Expr -> Bool -> Compile ()
 emitBinaryOp t op' e1 e2 b = do
   -- compile arguments
   compileExp e1 True
-  (arg1, t1) <- getPrevResult  -- ____rx = lookup
+  (arg1Temp, t1) <- getPrevResult  -- ____rx = lookup
+  arg1 <- newRegister t1
+  emit $ Mov t1 arg1Temp (Reg arg1)
   --r1' <- newRegister
   compileExp e2 True
   (arg2, t2) <- getPrevResult  -- RAX
@@ -1576,17 +1586,12 @@ emitBinaryOp t op' e1 e2 b = do
   -- mov the second operand away from RAX / XMM0
   arg2' <- if (arg2 ==  defaultReg 0 t)
             then do
-              if (op' == Ro EQU)
-                then error (show arg2)
-                else return ()
-              r2 <- newRegister (Lit t)
+              r2 <- newRegister (Lit t)  -- todo too late, we have already overriden arg1
               emit $ Mov (Lit t) arg2 (Reg r2) -- rbx
               return (Reg r2)
             else return arg2
   -- mov first operand to RAX / XMM0
-  if (arg1 == (defaultReg 0 t))
-    then return ()
-    else emit $ Mov (Lit t) arg1 (defaultReg 0 t)  -- rax
+  emit $ Mov (Lit t) (Reg arg1) (defaultReg 0 t)  -- rax
   -- create result register
   --r               <- newRegister (Lit t)
   -- compile and remove arguments
@@ -1599,7 +1604,7 @@ emitBinaryOp t op' e1 e2 b = do
   removeArgs 2
   -- compare will always return bool
   case op' of 
-    Ro _   -> setPrevVal ((defaultReg 0 Bool), (Lit t)) b
+    Ro _   -> setPrevVal ((defaultReg 0 Bool), (Lit Bool)) b
     Mo Mod -> setPrevVal ((X86 RDX),         (Lit Int)) b
     _      -> setPrevVal ((defaultReg 0 t   ), (Lit t)) b
 
@@ -1700,11 +1705,14 @@ compileExp e0 b = case e0 of
                   -- prev' <- loadReg
                   
                   if (isExtern)
-                    then emit $ Mov typ prev (X86 RDI) -- use same calling convention as runtime
+                    then if (id == Ident "printDouble")
+                          then emit $ MovF2         prev (X86 RDI)
+                          else emit $ Mov (Lit Int) prev (X86 RDI) -- use same calling convention as runtime
+                    
                     else if (typ == Lit Doub)
                       then do -- "push" doub manually
                         emit $ Mov typ prev (X86 (Stack 0))
-                        emit $ Add Minus (Lit Int) (X86 RSP) (LitInt 8)
+                        emit $ Add Minus (Lit Int) (X86 RSP) (LitInt 8) -- todo right order? need 8 extra space for first one?
                       else emit $ Push typ prev) es
     --allArgs <- gets prevResult
     --args    <- mapM (\x -> loadReg x) (reverse $ take n_args allArgs)
@@ -1721,7 +1729,7 @@ compileExp e0 b = case e0 of
         emit $ Push (Lit Int) (X86 R9)
         emit $ Push (Lit Int) (X86 R10)
         emit $ Push (Lit Int) (X86 R11)
-        emit $ Push (Lit Int) (X86 R11) -- extra to align
+        --emit $ Push (Lit Int) (X86 R11) -- extra to align
       else return ()
     --let args' = zip ts' args
     -- if void function, then no need to save the result
@@ -1730,7 +1738,7 @@ compileExp e0 b = case e0 of
     -- remove arguments from stack, if using push
     if (isExtern)
       then do
-        emit $ Pop (Lit Int) (X86 R11) -- extra to align
+        --emit $ Pop (Lit Int) (X86 R11) -- extra to align
         emit $ Pop (Lit Int) (X86 R11)
         emit $ Pop (Lit Int) (X86 R10)
         emit $ Pop (Lit Int) (X86 R9)
@@ -1812,7 +1820,7 @@ compileExp e0 b = case e0 of
     -- end
     emit $ Label end
     removeArgs 1
-    setPrevVal (X86 RAX, Ptr (Lit Bool)) b
+    setPrevVal (X86 RAX, (Lit Bool)) b
 
 
   EOr e1 e2 -> do
@@ -1859,7 +1867,7 @@ compileExp e0 b = case e0 of
     -- end
     emit $ Label end
     removeArgs 1
-    setPrevVal (X86 RAX, Ptr (Lit Bool)) b
+    setPrevVal (X86 RAX, Lit Bool) b
 
 
   Neg (ETyped e t) -> do
@@ -1877,9 +1885,12 @@ compileExp e0 b = case e0 of
         case e of
           (ELitDoub d) -> do
             compileExp (ETyped e t) b
-            r' <- getPrevResult
+            (r', _)  <- getPrevResult
             -- r' <- loadReg
-            setPrevVal (LitDoub ((-1.0)*d), Lit Doub) b
+            compileExp (ELitDoub (-1.0)) b -- todo same b as setprevval rly?
+            (r2', _) <- getPrevResult
+            emit $ Mul Times (Lit Doub) r'  r2'
+            setPrevVal (r', Lit Doub) b
           _            -> compileExp (ETyped (EMul e Times (ELitDoub (-1.0)) ) t) b
     
 

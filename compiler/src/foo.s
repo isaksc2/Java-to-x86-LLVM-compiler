@@ -11,103 +11,221 @@ segment .text
 main:
 	push    rbp
 	mov   rbp, rsp
-	sub   rsp, 48
 	mov   rsi, 1
-	mov   r8, rsi
+	push    rsi
 	mov   rsi, 2
-	mov   r9, rsi
+	push    rsi
 	mov   rsi, 3
-	mov   r10, rsi
+	push    rsi
 	mov   rsi, 4
-	mov   r11, rsi
+	push    rsi
+	mov   rax, __?float64?__(100.0)
+	movq  xmm2, rax
+	movsd [rsp], xmm2
+	sub   rsp, 8
+	mov   rax, __?float64?__(100.0)
+	movq  xmm2, rax
+	movsd [rsp], xmm2
+	sub   rsp, 8
+	mov   rax, __?float64?__(100.0)
+	movq  xmm2, rax
+	movsd [rsp], xmm2
+	sub   rsp, 8
+	mov   rax, __?float64?__(100.0)
+	movq  xmm2, rax
+	movsd [rsp], xmm2
+	sub   rsp, 8
 	mov   rsi, 5
-	mov   r12, rsi
+	push    rsi
 	mov   rsi, 6
-	mov   r13, rsi
+	push    rsi
 	mov   rsi, 7
-	mov   r14, rsi
+	push    rsi
 	mov   rsi, 8
-	mov   r15, rsi
+	push    rsi
 	mov   rsi, 9
-	mov   [rbp - 8], rsi
+	push    rsi
 	mov   rsi, 10
-	mov   [rbp - 16], rsi
+	push    rsi
 	mov   rsi, 11
-	mov   [rbp - 24], rsi
+	push    rsi
 	mov   rsi, 12
-	mov   [rbp - 32], rsi
-	mov   rax, __?float64?__(1.0)
-	movq  xmm2, rax
-	movsd xmm3, xmm2
-	mov   rax, __?float64?__(2.0)
-	movq  xmm2, rax
-	movsd xmm4, xmm2
-	mov   rax, __?float64?__(3.0)
-	movq  xmm2, rax
-	movsd xmm5, xmm2
-	mov   rax, __?float64?__(4.0)
-	movq  xmm2, rax
-	movsd xmm6, xmm2
-	mov   rax, __?float64?__(5.0)
-	movq  xmm2, rax
-	movsd xmm7, xmm2
-	mov   rax, __?float64?__(6.0)
-	movq  xmm2, rax
-	movsd xmm8, xmm2
-	mov   rax, __?float64?__(7.0)
-	movq  xmm2, rax
-	movsd xmm9, xmm2
-	mov   rax, __?float64?__(8.0)
-	movq  xmm2, rax
-	movsd xmm10, xmm2
-	mov   rax, __?float64?__(9.0)
-	movq  xmm2, rax
-	movsd xmm11, xmm2
-	mov   rax, __?float64?__(10.0)
-	movq  xmm2, rax
-	movsd xmm12, xmm2
-	mov   rax, __?float64?__(11.0)
-	movq  xmm2, rax
-	movsd xmm13, xmm2
-	mov   rax, __?float64?__(12.0)
-	movq  xmm2, rax
-	movsd xmm15, xmm2
-	mov   rax, __?float64?__(13.0)
-	movq  xmm2, rax
-	movsd [rbp - 40], xmm2
-	mov   rax, __?float64?__(14.0)
-	movq  xmm2, rax
-	movsd [rbp - 48], xmm2
-	mov   rax, r8
-	add   rax, r9
-	add   rax, r10
-	add   rax, r11
-	add   rax, r12
-	add   rax, r13
-	add   rax, r14
-	add   rax, r15
-	add   rax, [rbp - 8]
-	add   rax, [rbp - 16]
-	add   rax, [rbp - 24]
-	add   rax, [rbp - 32]
-	mov   rsi, rax
-	movsd xmm0, xmm3
-	addsd xmm0, xmm4
-	addsd xmm0, xmm5
-	addsd xmm0, xmm6
-	addsd xmm0, xmm7
-	addsd xmm0, xmm8
-	addsd xmm0, xmm9
-	addsd xmm0, xmm10
-	addsd xmm0, xmm11
-	addsd xmm0, xmm12
-	addsd xmm0, xmm13
-	addsd xmm0, xmm15
-	addsd xmm0, [rbp - 40]
-	addsd xmm0, [rbp - 48]
-	movsd xmm2, xmm0
+	push    rsi
+	mov   rsi, 13
+	push    rsi
+	mov   rsi, 14
+	push    rsi
+	mov   rsi, 15
+	push    rsi
+	mov   rsi, 16
+	push    rsi
+	call  many_params
+	add   rsp, 160
 	mov   rsi, 0
 	mov   rax, rsi
+	mov   rsp, rbp
+	pop     rbp
+	ret
+
+
+many_params:
+	push    rbp
+	mov   rbp, rsp
+	mov   rdi, [rbp + 8]
+	push    rbx
+	push    rsi
+	push    rdx
+	push    rcx
+	push    r8
+	push    r9
+	push    r10
+	push    r11
+	call  printInt
+	pop     r11
+	pop     r10
+	pop     r9
+	pop     r8
+	pop     rcx
+	pop     rdx
+	pop     rsi
+	pop     rbx
+	mov   rdi, [rbp + 72]
+	push    rbx
+	push    rsi
+	push    rdx
+	push    rcx
+	push    r8
+	push    r9
+	push    r10
+	push    r11
+	call  printInt
+	pop     r11
+	pop     r10
+	pop     r9
+	pop     r8
+	pop     rcx
+	pop     rdx
+	pop     rsi
+	pop     rbx
+	mov   rdi, [rbp + 104]
+	push    rbx
+	push    rsi
+	push    rdx
+	push    rcx
+	push    r8
+	push    r9
+	push    r10
+	push    r11
+	call  printInt
+	pop     r11
+	pop     r10
+	pop     r9
+	pop     r8
+	pop     rcx
+	pop     rdx
+	pop     rsi
+	pop     rbx
+	mov   rdi, [rbp + 136]
+	push    rbx
+	push    rsi
+	push    rdx
+	push    rcx
+	push    r8
+	push    r9
+	push    r10
+	push    r11
+	call  printInt
+	pop     r11
+	pop     r10
+	pop     r9
+	pop     r8
+	pop     rcx
+	pop     rdx
+	pop     rsi
+	pop     rbx
+	mov   rdi, [rbp + 40]
+	push    rbx
+	push    rsi
+	push    rdx
+	push    rcx
+	push    r8
+	push    r9
+	push    r10
+	push    r11
+	call  printDouble
+	pop     r11
+	pop     r10
+	pop     r9
+	pop     r8
+	pop     rcx
+	pop     rdx
+	pop     rsi
+	pop     rbx
+	mov   rsi, [rbp + 8]
+	mov   r8, 2
+	mov   rax, rsi
+	cmp   rax, r8
+	jne    L2
+	jmp   L3
+L2:
+	mov   rax, 1
+	jmp   L4
+L3:
+	mov   rax, 0
+	jmp   L4
+L4:
+	cmp   rax, 1
+	je    L0
+	jmp   L1
+L0:
+	push   qword [rbp + 160]
+	push   qword [rbp + 8]
+	push   qword [rbp + 16]
+	push   qword [rbp + 24]
+	movsd xmm2, [rbp + 64]
+	mov   rax, __?float64?__(2.0)
+	movq  xmm3, rax
+	movsd xmm0, xmm2
+	divsd xmm0, xmm3
+	movsd [rsp], xmm0
+	sub   rsp, 8
+	movsd xmm2, [rbp + 40]
+	mov   rax, __?float64?__(2.0)
+	movq  xmm3, rax
+	movsd xmm0, xmm2
+	mulsd xmm0, xmm3
+	movsd [rsp], xmm0
+	sub   rsp, 8
+	movsd xmm2, [rbp + 48]
+	mov   rax, __?float64?__(1.0)
+	movq  xmm3, rax
+	movsd xmm0, xmm2
+	addsd xmm0, xmm3
+	movsd [rsp], xmm0
+	sub   rsp, 8
+	movsd xmm2, [rbp + 56]
+	mov   rax, __?float64?__(0.0)
+	movq  xmm3, rax
+	movsd xmm0, xmm2
+	subsd xmm0, xmm3
+	movsd [rsp], xmm0
+	sub   rsp, 8
+	push   qword [rbp + 32]
+	push   qword [rbp + 72]
+	push   qword [rbp + 80]
+	push   qword [rbp + 88]
+	push   qword [rbp + 96]
+	push   qword [rbp + 104]
+	push   qword [rbp + 112]
+	push   qword [rbp + 120]
+	push   qword [rbp + 128]
+	push   qword [rbp + 136]
+	push   qword [rbp + 144]
+	push   qword [rbp + 152]
+	call  many_params
+	add   rsp, 160
+	jmp   L1
+L1:
 	mov   rsp, rbp
 	pop     rbp
 	ret
