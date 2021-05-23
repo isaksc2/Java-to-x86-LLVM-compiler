@@ -1,36 +1,41 @@
-For lav 3/C I (tried) implementing a x86-64 backend with register allocation optimization
+For lab 3/C I (tried) implementing a x86-64 backend with register allocation optimization
 
-The register allocation works correctly, which can be verified by compiling the src/10.jl.
-10.jl has many local variables so you can see that they first get allocated to "real" registers
-and then to the stack, for both ints and doubles. 
-The register allocation is very slow however, on my computer it can take 10 seconds to compile 10.jl.
-I probably need to use some different data structures;
-I use bitarrays to represent the def-, use-, succsessor- and livein-sets, and this becomes a bit problematic for
-the successor set for example; There can be 200+ lines of code, each line has a successor set with bool 200 elements
-So just from this we get 40 000 elements.
-
-I'm still failing some tests however (fail 11/36 good tests), they either print the wrong thing, or they never "halt".
+I'm still failing some tests (fails 8/36 good tests), they either print the wrong thing, or they never "halt".
 I'll make sure to fix this until the final deadline
 
-So you cant run the test suite as normal since it wont halt.
-if you want to test a specific test in the docker:
-    open jlc.hs
-    in main after line 20 in the do block, type for example: 
-        program <- readFile "testsuite/good/core014.jl"
-this will make every test use core14.jl as input, so you can only test 1 program at a time.
-
-But I can provide a list tests that fail here, if you just want to inspect the backend:
+These are the tests that fail:
     core001     no halt
-    core010     wrong print
     core012     prints nothing
     core013     prints nothing
-    core015     wrong print
     core017     no halt
     core019     no halt
     core029     no halt
-    core031     wrong print
-    intarith4   wrong print
-    intarith5   no halt
+    core031     wrong print (almost works, it just prints 0.0 instead of 100.0)
+    intarith5   prints nothing
+
+Some known issues:
+    All my double literals become 0.0
+    ?
+
+So running the docker like normal won't work since it will get stuck on some tests.
+If you want to try some tests, you can open jlc.hs and look in the main do-block on line 20:
+    the default input lets you run that given test in the docker, the one used right now is core031.jl
+        it fails, but it shows that we "almost" get the correct output
+    the second input option can be used when running jlc.hs outside the docker (you have to change the path on your computer)
+    the third option can be used to verify that the register allocation optimization works (more on that below)
+    the fourth option is used to test the docker like normal, there's no point in using it now, as mentioned.
+
+
+The register allocation works correctly, which can be verified by using src/10.jl as input.
+10.jl has many local variables so you can see that they first get allocated to "real" registers,
+and then to the stack when a register has to spill, for both ints and doubles. 
+The register allocation is very slow however, on my computer it can take 10 seconds to compile 10.jl.
+I probably need to use some different data structures;
+I use bitarrays to represent the def-, use-, succsessor- and livein-sets, and this becomes a bit problematic for
+the successor set for example; There can be 200+ lines of code, each line has a successor set 200 elements.
+So just from this we get 40 000 elements.
+
+
 
 
 
@@ -39,11 +44,11 @@ The structure is the same as the LLVM backend, apart from the new register optim
 But I'll include a copy of the description of the borrowed LLVM backend structure at the bottom of this document. 
 Ill also include any relevant changes in each section from the last backend.
 
-LlvmBackend.hs compiles the llvm code. it has 6 main sections: 
+X86Backend.hs compiles the x86 code. it has 6 main sections: 
 entry point
 types + state
 functions for interacting with the state
-functions for converting code to "llvm strings"
+functions for converting code to "x86 strings"
 functions for saving (emitting) code to the state
 helper functions for bit arrays ------------------------------ new
 register allocation functions   ------------------------------ new
@@ -67,25 +72,16 @@ The main function itself is called inside the compileFun function after compilin
 
 This is how the register allocation works on an abstract level:
 First we generate the code without register allocation and use new temporary registers for every calculcation.
-Then we run the register allocation optimization and swap the temporary registers with real registers or a "stack location".
-We also have to do "sub RSP 8*x" where x is the number of variables we spill 
+Then we run the register allocation optimization and swap the temporary registers with real registers or a "stack location" if we spill the register.
+We also have to do "sub RSP, 8*x" where x is the number of variables we spill 
 Furthermore, we have to 128 bit align the stack (by pushing and popping RCX) if x is odd.
 
 The details of the register allocation follows the algorithm presented in the lectures.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+The only interesting detail would be how we spill registers;
+    When we look for a "node / register" to remove from the interference graph, 
+    we keep track of the degree for each node, so if we dont find a node with degree < k 
+    to allocate a register to, we spill the node with the highest degree.
+    
 
 
 
@@ -112,17 +108,16 @@ strings constants and the functions themselves
 ---------------------- types + state:
 we use a state monad that contains variable / register enums, 
 compiled code and function / variable signatures.
-We also have a "Code" data type that contains all relevant llvm 
-instruction templates.
+We also have a "Code" data type that contains all relevant x86 instruction templates.
 
 
 --------- Changes:
 
 We added a Parameter type, which is used to distinguish temporary registers that need to be "register-allocated"
-and parameters that dont change.
+and parameters, that dont need to change.
 We added a "value-data-type" "X86" that can be concrete registers like RAX, stack variables, parameters and local variables.
 These are the data values we get after performing register allocation optimization.
-We added "output-code" types for x86 rather than llvm.
+We added "output-code" types for x86 rather than x86.
 
 
 
@@ -142,11 +137,11 @@ We updated the "loadReg" function to load values to RAX or XMM0 so that we avoid
 
 
 
----------------------- functions for converting code to "llvm strings":
-these functions convert our "llvm instruction templates" to strings
+---------------------- functions for converting code to "x86 strings":
+these functions convert our "x86 instruction templates" to strings
 
 ---------------------- functions for saving (emitting) code to the state:
-these functions take a llvm instruction template, turns it into a string and 
+these functions take an x86 instruction template, turns it into a string and 
 puts it in the state.
 
 ---------------------- functions for compiling functions:
@@ -174,9 +169,8 @@ As mentioned, we perform the register allocation optimization at the end of the 
 
 
 
-
 ---------------------- functions for compiling statements:
-given a statement, we compile it by emitting llvm instructions directly or 
+given a statement, we compile it by emitting x86 instructions directly or 
 by calling the compileExp function. The compileStm function returns a bool
 that tells us if the statement guarantees a return. If it does, then we can
 omit the following statements, as mentioned before.
@@ -193,7 +187,7 @@ We made a function "fixReturnReg" that moves the result to RAX / XMM0 when compi
 
 
 ---------------------- functions for compiling expressions:
-The compileExp function compiles expressions to llvm code. The function takes
+The compileExp function compiles expressions to x86 code. The function takes
 a bool argument that tells us if the expression is used as an operand or 
 argument for a different expression. If so, then we make sure that it is 
 not overridden by subsequent "arguments" by passing this bool to the
@@ -205,17 +199,18 @@ of the list, rather than ovverriding the last element.
 -------- Changes:
 we use a function "defaultReg" that simply gives RAX, RBX, XMM0 and XMM1 as standard for binary operations.
 for binary operations:
-    We first compile the teh first argument and mov it to a temporary register to prevent 
+    We first compile the the first argument and mov it to a temporary register to prevent 
     the second argument from overriding it.
     We then move the second argument away from RAX/XMM0 if its there so we can place the first argument there.
     then we "print" the instruction
 We always "mov" literals (like 3.456 and 7) to a temporary register to avoid trouble with instructions that cant handle literals
-    its probably better to not instead only "mov" if 100% necassary to make the code less bloated.
-when compiling function calls "EApp", 
-    if were calling an extern function from the runtime we:
-        push and pop registers the caller is responsible for.
-        and we push the argument to RDI
-        Right now we push all "caller" registers even if we dont use them, which creates a lot of spaghetti, I hope to fix this next week.
+    its probably better to instead only "mov" if it's 100% necassary to make the code less bloated.
+when compiling function calls (EApp expressions): 
+    push and pop registers the caller is responsible for.
+    Right now we push and pop all "caller" registers even if we dont use them, which creates a lot of spaghetti code,
+    I hope to fix this next week.
+    if we're calling an extern function from the runtime we:
+        we push the argument to RDI
     if we are calling a function defined inside the program:
         we push and pop RCX to align the stack if theres an odd number of arguments 
         we push int arguments to the stack using "push"

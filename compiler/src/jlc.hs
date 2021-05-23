@@ -13,18 +13,28 @@ import Javalette.ErrM           (pattern Ok, pattern Bad)
 import Javalette.Abs
 
 import TypeChecker
---import LlvmBackend
+--import writeX86Backend
 import X86Backend
 
 main :: IO ExitCode
 main = do
-  --program <- hGetContents stdin
-  --program <- readFile "data/core016.jl"
-  program <- readFile "testsuite/good/core017.jl"
+
+  ----------- for running 1 specific test in the docker ------------------------
+  program <- readFile "testsuite/good/core031.jl"
+
+
+  -------------------------- for debugging ----------------------------------------
   --program <- readFile "../../test/testsuite/good/core031.jl"
+
+
+  ---------------- for verifying that the register allocation works ---------------
   --program <- readFile "10.jl"
+
+
+  ------------------ for using the docker like normal ----------------------------
+  --program <- hGetContents stdin
+  
   check program
-  --check "int main() { if (true == true) {printInt(42);} return 0;}"
 
 -- | Parse and type check a program given by the @String@.
 check :: String -> IO ExitCode
@@ -40,14 +50,12 @@ check s = do
           exitFailure
         Ok tree -> do
           hPutStrLn stderr "OK"
-          llvm tree
-          --exitSuccess
+          writeX86 tree
 
--- take type annotates syntax tree, compile it to llvm code and write to file
-llvm :: Prog -> IO ExitCode
-llvm p = do
+-- take type annotates syntax tree, compile it to llvm code and write to file + stdout
+writeX86 :: Prog -> IO ExitCode
+writeX86 p = do
   let code = compile p
-  --writeFile "main.ll" code -- file for debugging
   writeFile "foo.s" code -- file for debugging
   putStrLn code
   exitSuccess

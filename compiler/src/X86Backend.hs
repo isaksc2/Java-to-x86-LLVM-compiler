@@ -112,7 +112,7 @@ initSt s = St { sig          = s
               , cxt          = [[]]
               , nextLabel    = L 0
               , nextReg      = R 0
-              , nextPar      = P 0
+              , nextPar      = P 16
               , output       = []
               , prevResult   = []
               , globalOut    = []
@@ -612,7 +612,7 @@ registerAlloc = do
   (P p)         <- gets nextPar
   let pushRbp    = 8
   let returnAdr  = 8
-  let aligned    = (localSize + (p-8) + pushRbp + returnAdr) `mod` 16 == 0
+  let aligned    = (localSize + p + pushRbp + returnAdr) `mod` 16 == 0
   let align      = if (aligned)     
                     then                             o2
                     else  (Push ( Int) (X86 RCX)):o2
@@ -1264,7 +1264,7 @@ compileFun (Ident f) t0 args ss = do
   modify $ \st -> st { output = []}
   modify $ \st -> st { globalOut = []}
   modify $ \st -> st { nextReg = R 0}
-  modify $ \st -> st { nextPar = P 8}
+  modify $ \st -> st { nextPar = P 16}
   -- make a new variable and alloc memory for each parameter:
   regs <- mapM (\(Argument t' x) -> do
                                         (P r') <- newParam ( t')
@@ -1624,7 +1624,6 @@ compileExp e0 b = case e0 of
     emit $ Mov ( Int) (LitInt i) (Reg r)
     setPrevVal (Reg r,  Int)  b
   ELitDoub d -> do
-    --r <- newRegister ( Int)
     r2 <- newRegister ( Doub)
     emit $ MovF  (LitDoub d) (X86 RAX)
     emit $ MovF2 (X86 RAX) (Reg r2)
@@ -1633,12 +1632,10 @@ compileExp e0 b = case e0 of
     r <- newRegister ( Bool)
     emit $ Mov ( Bool) (LitBool True) (Reg r)
     setPrevVal (Reg r,  Bool)  b
-    --setPrevVal (LitBool True ,  Bool) b
   ELitFalse   -> do
     r <- newRegister ( Bool)
     emit $ Mov ( Bool) (LitBool False) (Reg r)
     setPrevVal (Reg r,  Bool)  b
-    --setPrevVal (LitBool False ,  Bool) b -- todo rly?
 
 
   EString s  -> do
@@ -1666,26 +1663,12 @@ compileExp e0 b = case e0 of
       then emit $ Push ( Int) (X86 RCX)
       else return ()
 
-    -- compile arguments and and make sure they dont override each other
-    mapM_ (\e -> do
-                  compileExp e False -- todo used to be true
-                  (prev, typ) <- getPrevResult
-                  -- prev' <- loadReg
-                  
-                  if (isExtern)
-                    then if (id == Ident "printDouble")
-                          then emit $ MovF2         prev (X86 RDI)
-                          else emit $ Mov ( Int) prev (X86 RDI) -- use same calling convention as runtime
-                    
-                    else if (typ ==  Doub)
-                      then do -- "push" doub manually
-                        emit $ Add Minus ( Int) (X86 RSP) (LitInt 8) -- todo right order? need 8 extra space for first one?
-                        emit $ Mov typ prev (X86 (Stack 0))
-                      else emit $ Push typ prev) es
     -- save registers
-    if (isExtern)
+    if (True || isExtern)
       then do
+        emit $ Push ( Int) (X86 RBX) -- push 1 extra to 128 bit align
         emit $ Push ( Int) (X86 RBX)
+        emit $ Push ( Int) (X86 RDI)
         emit $ Push ( Int) (X86 RSI)
         emit $ Push ( Int) (X86 RDX)
         emit $ Push ( Int) (X86 RCX)
@@ -1694,29 +1677,48 @@ compileExp e0 b = case e0 of
         emit $ Push ( Int) (X86 R10)
         emit $ Push ( Int) (X86 R11)
       else return ()
+    -- compile arguments and and make sure they dont override each other
+    mapM_ (\e -> do
+                  compileExp e False -- todo used to be true
+                  (prev, typ) <- getPrevResult
+                  -- move argument to rdi
+                  if (isExtern)
+                    then if (id == Ident "printDouble")
+                          then emit $ MovF2      prev (X86 RDI)
+                          else emit $ Mov ( Int) prev (X86 RDI) -- use same calling convention as runtime
+                    
+                    else if (typ == Doub)
+                      then do -- "push" doub manually
+                        emit $ Add Minus ( Int) (X86 RSP) (LitInt 8) 
+                        emit $ Mov typ prev (X86 (Stack 0))
+                      else do
+                        emit $ Push typ prev) es
     -- call function
     emit $ Call ( t) id
-    if (isExtern)
-      then do
-        emit $ Pop ( Int) (X86 R11)
-        emit $ Pop ( Int) (X86 R10)
-        emit $ Pop ( Int) (X86 R9)
-        emit $ Pop ( Int) (X86 R8)
-        emit $ Pop ( Int) (X86 RCX)
-        emit $ Pop ( Int) (X86 RDX)
-        emit $ Pop ( Int) (X86 RSI)
-        emit $ Pop ( Int) (X86 RBX)
-        return ()
-      else do 
-        -- remove arguments + alignment bytes
-        emit $ Add Plus ( Int) (X86 RSP) (LitInt $ sum $ map (\x -> size ( x)) ts)
-        if (not aligned)
-          then emit $ Pop ( Int) (X86 RCX)
-          else return ()
+    -- remove arguments
+    if (not isExtern)
+      then emit $ Add Plus ( Int) (X86 RSP) (LitInt $ sum $ map (\x -> size ( x)) ts)
+      else return ()
+    -- restore registers
+    emit $ Pop ( Int) (X86 R11)
+    emit $ Pop ( Int) (X86 R10)
+    emit $ Pop ( Int) (X86 R9)
+    emit $ Pop ( Int) (X86 R8)
+    emit $ Pop ( Int) (X86 RCX)
+    emit $ Pop ( Int) (X86 RDX)
+    emit $ Pop ( Int) (X86 RSI)
+    emit $ Pop ( Int) (X86 RDI)
+    emit $ Pop ( Int) (X86 RBX)
+    emit $ Pop ( Int) (X86 RBX)
+    -- remove alignment
+    if ((not isExtern) && not aligned)
+      then emit $ Pop ( Int) (X86 RCX)
+      else return ()
     -- set return value
     if (t == Doub)
       then setPrevVal ((X86 XMM0), ( t)) b
       else setPrevVal ((X86 RAX ), ( t)) b
+
 
   ETyped (EAdd e1 op e2) t              -> emitBinaryOp t (Ao op) e1 e2 b
   ETyped (EMul e1 op e2) t              -> emitBinaryOp t (Mo op) e1 e2 b
