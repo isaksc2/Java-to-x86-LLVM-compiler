@@ -331,19 +331,19 @@ indent s | head s == '@' = s
 indent s                 = "\t" ++ s
 
 impossible :: Code -> String
-impossible a = error $ "impossible code " ++ toLLVM a
+impossible a = error $ "impossible code " ++ toX86 a
 
 
 
 -------------------------------------------------- convert code
 
 
-class ToLLVM a where
-    toLLVM :: a -> String
+class ToX86 a where
+    toX86 :: a -> String
 
 
-instance ToLLVM Type where
-  toLLVM t = case t of
+instance ToX86 Type where
+  toX86 t = case t of
     Int    -> "i32"
     Void   -> "void"
     Bool   -> "i1"
@@ -356,20 +356,20 @@ prefixMulOp ( Int) Times  = "imul"
 prefixMulOp ( Doub) Times = "mulsd"
 
 
-instance ToLLVM AddOp where
-  toLLVM op = case op of
+instance ToX86 AddOp where
+  toX86 op = case op of
     Plus  -> "add"
     Minus -> "sub"
 
 -- add proper prefix to relop
 prefixRelOp :: Type -> RelOp -> String
-prefixRelOp ( Doub) op                         = "o" ++ toLLVM op
-prefixRelOp ( Int)  op | op == EQU || op == NE =        toLLVM op
-prefixRelOp ( Int)  op                         = "s" ++ toLLVM op
+prefixRelOp ( Doub) op                         = "o" ++ toX86 op
+prefixRelOp ( Int)  op | op == EQU || op == NE =        toX86 op
+prefixRelOp ( Int)  op                         = "s" ++ toX86 op
 prefixRelOp ( Bool) op                         = prefixRelOp ( Int) op
 
-instance ToLLVM RelOp where
-  toLLVM op = case op of
+instance ToX86 RelOp where
+  toX86 op = case op of
     LTH   -> "l"
     GTH   -> "g"
     LE    -> "le"
@@ -377,25 +377,25 @@ instance ToLLVM RelOp where
     EQU   -> "e"
     NE    -> "ne"
 
-instance ToLLVM Index where
-  toLLVM (I (i:[])) = toLLVM ( Int) ++ " " ++ show i
-  toLLVM (I (i:is)) = toLLVM ( Int) ++ " " ++ show i ++ ", " ++ toLLVM (I is)
+instance ToX86 Index where
+  toX86 (I (i:[])) = toX86 ( Int) ++ " " ++ show i
+  toX86 (I (i:is)) = toX86 ( Int) ++ " " ++ show i ++ ", " ++ toX86 (I is)
 
-instance ToLLVM FunHead where
-  toLLVM (FunHead (Ident f) (FunType t ts)) = "define " ++ toLLVM t ++ " @" ++ f ++ "(" ++ ( reverse ( drop 2 ( reverse (((\t -> t ++ ", ") . toLLVM) =<< ts)))) ++ ")"
+instance ToX86 FunHead where
+  toX86 (FunHead (Ident f) (FunType t ts)) = "define " ++ toX86 t ++ " @" ++ f ++ "(" ++ ( reverse ( drop 2 ( reverse (((\t -> t ++ ", ") . toX86) =<< ts)))) ++ ")"
 
-instance ToLLVM Label where
-  toLLVM (L l) = "L" ++ show l
+instance ToX86 Label where
+  toX86 (L l) = "L" ++ show l
 
-instance ToLLVM Value where
-  toLLVM = \case
+instance ToX86 Value where
+  toX86 = \case
     LitInt i      -> show i
     LitDoub d     -> "__?float64?__(" ++ show d ++ ")"
     LitBool True  -> "1" 
     LitBool False -> "0" 
     LitString s   -> error $ "can only print adress to string, not string directly"
-    Reg r         -> toLLVM r
-    Glob g        -> toLLVM g 
+    Reg r         -> toX86 r
+    Glob g        -> toX86 g 
     X86 (Locals 0) -> "[rbp]"
     X86 (Locals n) -> "[rbp - " ++ show n ++ "]"
     X86 (Stack  0) -> "[rsp]"
@@ -403,16 +403,16 @@ instance ToLLVM Value where
     X86 (Param  n) -> "[rbp + " ++ show n ++ "]"
     X86 reg       -> (map (\c -> toLower c) (show reg))
     
-instance ToLLVM Register where
-  toLLVM (R r) = "________RRRR" ++ show r
+instance ToX86 Register where
+  toX86 (R r) = "________RRRR" ++ show r
 
-instance ToLLVM GlobalRegister where
-  toLLVM (G g) = "str" ++ show g
+instance ToX86 GlobalRegister where
+  toX86 (G g) = "str" ++ show g
 
-instance ToLLVM Arguments where
-  toLLVM (Args [])          = ""
-  toLLVM (Args [(t, v)])    = toLLVM t ++ " " ++ toLLVM v
-  toLLVM (Args ((t, v):as)) = toLLVM t ++ " " ++ toLLVM v ++ ", " ++ toLLVM (Args as)
+instance ToX86 Arguments where
+  toX86 (Args [])          = ""
+  toX86 (Args [(t, v)])    = toX86 t ++ " " ++ toX86 v
+  toX86 (Args ((t, v):as)) = toX86 t ++ " " ++ toX86 v ++ ", " ++ toX86 (Args as)
 
 -- print string in array form
 stringType :: String -> String
@@ -433,37 +433,37 @@ sizeKeyword t x = case x of
     prefixT ( Doub) = "q"
     prefixT _ = "q"
 
-instance ToLLVM Code where
-  toLLVM = \case
+instance ToX86 Code where
+  toX86 = \case
     Return                         -> "ret"
     Call t (Ident f)               -> "call  " ++ f
-    Global adr t (LitString s)     -> toLLVM adr ++ " db \"" ++ s ++ "\", 0"
-    Label l                        -> toLLVM l ++ ":"
-    Branch lb                      -> "jmp   " ++ toLLVM lb
-    BranchCond op lb               -> "j" ++ toLLVM op ++ "    " ++ toLLVM lb
-    Cmp t v1 v2 | t ==  Doub    -> "comisd " ++ (sizeKeyword t v1) ++ ""    ++ toLLVM v1 ++ ", " ++ toLLVM v2
-                | otherwise        -> "cmp  " ++   (sizeKeyword t v1) ++ " "   ++ toLLVM v1 ++ ", " ++ toLLVM v2
-    Add op t v1 v2 | t ==  Int  -> toLLVM op                       ++ "   " ++ toLLVM v1 ++ ", " ++ toLLVM v2
-                   | t ==  Doub -> toLLVM op                       ++ "sd " ++ toLLVM v1 ++ ", " ++ toLLVM v2
-    Mul op t v1 v2                 -> (prefixMulOp t op)      ++ " " ++ toLLVM v1 ++ ", " ++ toLLVM v2
-    DivD v1 v2                     -> "divsd " ++ toLLVM v1 ++ ", " ++ toLLVM v2
-    DivI v                         -> "div   " ++ toLLVM v
-    Mov t v1 v2 | t == ( Doub)  -> "movsd " ++ toLLVM v2 ++ ", " ++ toLLVM v1
-                | otherwise        -> "mov   " ++ toLLVM v2 ++ ", " ++ toLLVM v1
+    Global adr t (LitString s)     -> toX86 adr ++ " db \"" ++ s ++ "\", 0"
+    Label l                        -> toX86 l ++ ":"
+    Branch lb                      -> "jmp   " ++ toX86 lb
+    BranchCond op lb               -> "j" ++ toX86 op ++ "    " ++ toX86 lb
+    Cmp t v1 v2 | t ==  Doub       -> "comisd " ++ (sizeKeyword t v1) ++ ""    ++ toX86 v1 ++ ", " ++ toX86 v2
+                | otherwise        -> "cmp  " ++   (sizeKeyword t v1) ++ " "   ++ toX86 v1 ++ ", " ++ toX86 v2
+    Add op t v1 v2 | t ==  Int     -> toX86 op                        ++ "   " ++ toX86 v1 ++ ", " ++ toX86 v2
+                   | t ==  Doub    -> toX86 op                        ++ "sd " ++ toX86 v1 ++ ", " ++ toX86 v2
+    Mul op t v1 v2                 -> (prefixMulOp t op)              ++ " "   ++ toX86 v1 ++ ", " ++ toX86 v2
+    DivD v1 v2                     -> "divsd " ++ toX86 v1 ++ ", " ++ toX86 v2
+    DivI v                         -> "div   " ++ toX86 v
+    Mov t v1 v2 | t == ( Doub)     -> "movsd " ++ toX86 v2 ++ ", " ++ toX86 v1
+                | otherwise        -> "mov   " ++ toX86 v2 ++ ", " ++ toX86 v1
     -- mov __?float62?__(x.y) to RAX
-    MovF  v1 v2                    -> "mov   " ++ toLLVM v2 ++ ", " ++ toLLVM v1
+    MovF  v1 v2                    -> "mov   " ++ toX86 v2 ++ ", " ++ toX86 v1
     -- mov RAX to xmm
-    MovF2 (X86 (Locals v1)) v2     -> "mov   " ++ toLLVM v2 ++ ", " ++ toLLVM (X86 (Locals v1))
-    MovF2 (X86 (Param  v1)) v2     -> "mov   " ++ toLLVM v2 ++ ", " ++ toLLVM (X86 (Param v1))
-    MovF2 v1 v2                    -> "movq  " ++ toLLVM v2 ++ ", " ++ toLLVM v1
+    MovF2 (X86 (Locals v1)) v2     -> "mov   " ++ toX86 v2 ++ ", " ++ toX86 (X86 (Locals v1))
+    MovF2 (X86 (Param  v1)) v2     -> "mov   " ++ toX86 v2 ++ ", " ++ toX86 (X86 (Param v1))
+    MovF2 v1 v2                    -> "movq  " ++ toX86 v2 ++ ", " ++ toX86 v1
     -- mov from xmm to e.g RDI
-    MovF3 v1 v2                    -> "movq  " ++ toLLVM v2 ++ ", " ++ toLLVM v1
-    Pop t v                        -> "pop     " ++ toLLVM v
-    Push t v | t ==  Doub       -> "push   "++ toLLVM v -- todo not in use
-             | t ==  String     -> "push qword ["  ++ toLLVM v ++ "]" -- todo used to be word
-             | otherwise           -> "push   " ++ (sizeKeyword t v)  ++ " " ++ toLLVM v 
-    IncDec op v                    -> instructionIncDec op ++ " " ++ toLLVM v
-    CNeg v                         -> "neg  " ++ toLLVM v
+    MovF3 v1 v2                    -> "movq  "   ++ toX86 v2 ++ ", " ++ toX86 v1
+    Pop t v                        -> "pop     " ++ toX86 v
+    Push t v | t ==  Doub          -> "push   "  ++ toX86 v -- todo not in use
+             | t ==  String        -> "push qword ["  ++ toX86 v ++ "]" -- todo used to be word
+             | otherwise           -> "push   " ++ (sizeKeyword t v)  ++ " " ++ toX86 v 
+    IncDec op v                    -> instructionIncDec op ++ " " ++ toX86 v
+    CNeg v                         -> "neg  " ++ toX86 v
     Comment ""                     -> ""
     Comment s                      -> "; " ++ s
     c                              -> show c
@@ -481,9 +481,7 @@ instance ToLLVM Code where
 
 -- add llvm code line to output
 emit :: Code -> Compile ()
--- emit (Store ( Void) _ _) = return ()
--- emit (Load  _ ( Void) _) = return ()
-emit c                      = modify $ \st@St { output = cs } -> st { output = c : cs }
+emit c = modify $ \st@St { output = cs } -> st { output = c : cs }
 
 -- add global constant string to output
 emitGlobal :: Code -> Compile ()
@@ -511,7 +509,7 @@ blank = comment ""
 bitArray :: Int -> [Bool]
 bitArray n = take n (repeat False)
 
-
+-- replace nth element in array
 replaceNth :: Int -> a -> [a] -> [a]
 replaceNth _ _ [] = []
 replaceNth n newVal (x:xs)
@@ -537,14 +535,14 @@ bitXor a b = map (\(c,d) -> (c && not d) || (d && not c)) (zip a b)
 bitMinus :: [Bool] -> [Bool] -> [Bool]
 bitMinus a b = map (\(c,d) -> (c && not d)) (zip a b)
 
--- count nbr of True
+-- count nbr of True elements
 boolSum :: [Bool] -> Int
 boolSum ds = sum (map (\x -> if (x)
                               then 1
                               else 0) ds)
 
 
--- get element in list using index
+-- get element in list at given index
 getElem :: Int -> [a] -> a 
 getElem i l = last $ take (i+1) l
 
@@ -1190,7 +1188,7 @@ registerOutput typ realRegs tempRegs colorMap = do
 
                   -- swap temp-reg with real reg if its the correct one
                   swap 
-                    :: Type -- register type 
+                    :: Type     -- register type 
                     -> Value    -- value to update
                     -> Register -- register to update
                     -> Value    -- updated value
@@ -1214,12 +1212,7 @@ registerOutput typ realRegs tempRegs colorMap = do
                         let index = (elemIndex True color)
                         if (isNothing index)
                           then error $ show (s:ss)
-                          else do
-                            let rr = getElem (fromJust index) realRegs
-                            --if (rr == X)
-                            --emit $ Comment (show rr ++ ----------)
-                            rr
-                        -- more regs than colors since we removed spill, eaxctly k colors tho
+                          else getElem (fromJust index) realRegs
 
 
 
@@ -1256,9 +1249,9 @@ compileDefs st (d:ds) = do
 compileDef :: St -> TopDef -> (String, String, St)
 compileDef st def@(FnDef t (Ident f) args (Block ss)) = do
   -- print the function header
-  let func  = intercalate "" [f, ":\n", unlines $ map (indent . toLLVM) $ reverse $ (output st'), "\n"]
+  let func  = intercalate "" [f, ":\n", unlines $ map (indent . toX86) $ reverse $ (output st'), "\n"]
   -- print the string constants
-  let glob  = unlines $ map toLLVM $ reverse (globalOut st')
+  let glob  = unlines $ map toX86 $ reverse (globalOut st')
   (func, glob, st')
   -- compile the function
   where st' = execState (compileFun (Ident f) t args ss) st
@@ -1277,7 +1270,7 @@ compileFun (Ident f) t0 args ss = do
                                         (P r') <- newParam ( t')
                                         newVar x (X86 (Param r'))  ( t')
                                         return (P r')
-                                      ) args
+                                      ) (reverse args)
   -- push registers
   emit $ Push ( Int) (X86 RBP)
   emit $ Mov ( Int) (X86 RSP) (X86 RBP)
@@ -1286,7 +1279,7 @@ compileFun (Ident f) t0 args ss = do
   if (t0 == Void)
     then do 
       prevStm <- gets output
-      if (length prevStm /= 0 && (head $ words $ toLLVM $ head prevStm) == "ret")
+      if (length prevStm /= 0 && (head $ words $ toX86 $ head prevStm) == "ret")
         then return ()
         else do
           -- pop registers
@@ -1319,11 +1312,10 @@ compileDecl t (Init id (ETyped e _)) = do
   r <- newRegister ( t)
   newVar id (Reg r) ( t)
   (p, t')  <- getPrevResult
-  -- p' <- loadReg p
   emit $ Mov ( t) p (Reg r)
 
 compileDecl t (NoInit id) = do
-  -- just create new variable
+  -- create new variable and use default value
   r <- newRegister ( t)
   newVar id (Reg r) ( t)
   default0 r t
@@ -1335,7 +1327,6 @@ compileDecl t (NoInit id) = do
     default0 r Doub = do
       emit $ MovF  (LitDoub 0.0) (X86 RAX)
       emit $ MovF2 (X86 RAX) (Reg r)
-      --setPrevVal (Reg r,  Doub)  b
     default0 r Int = emit $ Mov ( t) (LitInt 0) (Reg r)  
     default0 r Bool = emit $ Mov ( t) (LitBool False) (Reg r)  
 
@@ -1370,8 +1361,6 @@ compileStm (Retting s0 ret) = do
     Ret e@(ETyped _ t) -> do
       compileExp e False
       (r, t0)  <- getPrevResult
-      -- r' <- loadReg r
-      --emit $ Return ( t) r'
       fixReturnReg t r
       -- pop registers
       emit $ Mov ( Int) (X86 RBP) (X86 RSP) 
@@ -1384,7 +1373,7 @@ compileStm (Retting s0 ret) = do
       -- pop registers
       emit $ Mov ( Int) (X86 RBP) (X86 RSP)
       emit $ Pop ( Int) (X86 RBP)
-      emit $ Return -- used to be 2 emit return for some reason
+      emit $ Return
       return True
 
 
@@ -1526,7 +1515,7 @@ compileStm (Retting s0 ret) = do
 incDecr :: Ident -> AddOp -> Compile Bool
 incDecr i op = do
   (adr, t) <- lookupVar i
-  -- adr'''   <- loadReg (Reg adr, t)
+  -- only int has direct inc / dec instruction
   if (t == ( Int) )
     then do 
       emit $ IncDec op adr
@@ -1554,18 +1543,14 @@ defaultReg 1 _    = X86 RBX
 -- helper: emit add / mul / rel expression.
 emitBinaryOp :: Type -> Operator -> Expr -> Expr -> Bool -> Compile ()
 emitBinaryOp t op' e1 e2 b = do
-  -- compile arguments
+  -- compile arg 1
   compileExp e1 True
-  (arg1Temp, t1) <- getPrevResult  -- ____rx = lookup
+  (arg1Temp, t1) <- getPrevResult
   arg1 <- newRegister t1
   emit $ Mov t1 arg1Temp (Reg arg1)
-  --r1' <- newRegister
+  -- compile arg2
   compileExp e2 True
-  (arg2, t2) <- getPrevResult  -- RAX
-  --allArgs         <- gets prevResult
-  -- args'   <- mapM (\x -> loadReg x) $ take 2 allArgs 
-  --let [(arg1, t1), (arg2, _)] = take 2 allArgs
-  --r'    <- loadReg (arg1, t1)
+  (arg2, t2) <- getPrevResult 
   -- mov the second operand away from RAX / XMM0
   arg2' <- if (arg2 ==  defaultReg 0 t)
             then do
@@ -1648,12 +1633,12 @@ compileExp e0 b = case e0 of
     r <- newRegister ( Bool)
     emit $ Mov ( Bool) (LitBool True) (Reg r)
     setPrevVal (Reg r,  Bool)  b
-    setPrevVal (LitBool True ,  Bool) b
+    --setPrevVal (LitBool True ,  Bool) b
   ELitFalse   -> do
     r <- newRegister ( Bool)
     emit $ Mov ( Bool) (LitBool False) (Reg r)
     setPrevVal (Reg r,  Bool)  b
-    setPrevVal (LitBool False ,  Bool) b
+    --setPrevVal (LitBool False ,  Bool) b -- todo rly?
 
 
   EString s  -> do
@@ -1697,13 +1682,9 @@ compileExp e0 b = case e0 of
                         emit $ Add Minus ( Int) (X86 RSP) (LitInt 8) -- todo right order? need 8 extra space for first one?
                         emit $ Mov typ prev (X86 (Stack 0))
                       else emit $ Push typ prev) es
-    --allArgs <- gets prevResult
-    --args    <- mapM (\x -> loadReg x) (reverse $ take n_args allArgs)
-    -- fix types
     -- save registers
     if (isExtern)
       then do
-        --emit $ Push ( Int) (X86 RDI)
         emit $ Push ( Int) (X86 RBX)
         emit $ Push ( Int) (X86 RSI)
         emit $ Push ( Int) (X86 RDX)
@@ -1712,16 +1693,11 @@ compileExp e0 b = case e0 of
         emit $ Push ( Int) (X86 R9)
         emit $ Push ( Int) (X86 R10)
         emit $ Push ( Int) (X86 R11)
-        --emit $ Push ( Int) (X86 R11) -- extra to align
       else return ()
-    --let args' = zip ts' args
-    -- if void function, then no need to save the result
-
+    -- call function
     emit $ Call ( t) id
-    -- remove arguments from stack, if using push
     if (isExtern)
       then do
-        --emit $ Pop ( Int) (X86 R11) -- extra to align
         emit $ Pop ( Int) (X86 R11)
         emit $ Pop ( Int) (X86 R10)
         emit $ Pop ( Int) (X86 R9)
@@ -1730,7 +1706,6 @@ compileExp e0 b = case e0 of
         emit $ Pop ( Int) (X86 RDX)
         emit $ Pop ( Int) (X86 RSI)
         emit $ Pop ( Int) (X86 RBX)
-        --emit $ Pop ( Int) (X86 RDI)
         return ()
       else do 
         -- remove arguments + alignment bytes
@@ -1738,21 +1713,10 @@ compileExp e0 b = case e0 of
         if (not aligned)
           then emit $ Pop ( Int) (X86 RCX)
           else return ()
+    -- set return value
     if (t == Doub)
       then setPrevVal ((X86 XMM0), ( t)) b
       else setPrevVal ((X86 RAX ), ( t)) b
-{-
-    if (t == Void)
-      then do
-        emit $ CallVoid ( t) id (Args args')
-        removeArgs n_args
-      else do
-        r <- newRegister ( t)
-        emit $ Call r ( t) id (Args args')
-        --removeArgs n_args
-        setPrevVal (Reg r, ( t)) b
-        -}
-
 
   ETyped (EAdd e1 op e2) t              -> emitBinaryOp t (Ao op) e1 e2 b
   ETyped (EMul e1 op e2) t              -> emitBinaryOp t (Mo op) e1 e2 b
@@ -1763,12 +1727,8 @@ compileExp e0 b = case e0 of
     -- e1 true?
     compileExp e1 True
     (e1_result, t1) <- getPrevResult
-    -- e1_result <- loadReg r1 --
-    t         <- newLabel
-    f         <- newLabel
-    -- create result variable
-    --result    <- newRegister ( Bool)
-    --emit $ Alloca result ( Bool)
+    t               <- newLabel
+    f               <- newLabel
     -- if e1 true, then compile e2, otherwise skip (lazy eval)
     r'    <- loadReg (e1_result, t1)
     emit $ Cmp ( Bool) r' (LitBool True)
@@ -1779,7 +1739,6 @@ compileExp e0 b = case e0 of
     emit $ Label t 
     compileExp e2 False -- it is ok to overwrite e1_result
     (e2_result, typ2) <- getPrevResult
-    --e2_result <- loadReg r2
     t2        <- newLabel
     -- if e2 true, emit true, otherwise false
     e2_result'    <- loadReg (e2_result, typ2)
@@ -1789,14 +1748,12 @@ compileExp e0 b = case e0 of
 
     -- emit true
     emit $ Label t2
-    --emit $ Store ( Bool) (LitBool True) result
     emit $ Mov ( Bool) (LitBool True) (X86 RAX)
     end <- newLabel
     emit $ Branch end
 
     -- emit false
     emit $ Label f
-    --emit $ Store ( Bool) (LitBool False) result
     emit $ Mov ( Bool) (LitBool False) (X86 RAX)
     emit $ Branch end
 
@@ -1810,12 +1767,8 @@ compileExp e0 b = case e0 of
     -- e1 true?
     compileExp e1 True
     (e1_result, t1) <- getPrevResult
-    -- e1_result <- loadReg r1 
     t         <- newLabel
     f         <- newLabel
-    --result    <- newRegister ( Bool)
-    -- create result variable
-    --emit $ Alloca result ( Bool)
     -- if e1 true, then emit true, otherwise check e2
     e1_result'    <- loadReg (e1_result, t1)
     emit $ Cmp ( Bool) e1_result' (LitBool True)
@@ -1826,7 +1779,6 @@ compileExp e0 b = case e0 of
     emit $ Label f 
     compileExp e2 False -- ok to overwrite e1_result
     (e2_result, t2) <- getPrevResult
-    -- e2_result <- loadReg r2
     f2        <- newLabel
     -- if e2 true, then emit true, otherwise emit false
     e2_result'    <- loadReg (e2_result, t2)
@@ -1836,14 +1788,12 @@ compileExp e0 b = case e0 of
 
     -- both were false
     emit $ Label f2
-    --emit $ Store ( Bool) (LitBool False) result
     emit $ Mov ( Bool) (LitBool False) (X86 RAX)
     end <- newLabel
     emit $ Branch end
 
     -- something was true
     emit $ Label t
-    --emit $ Store ( Bool) (LitBool True) result
     emit $ Mov ( Bool) (LitBool True) (X86 RAX)
     emit $ Branch end
 
@@ -1859,19 +1809,13 @@ compileExp e0 b = case e0 of
         compileExp (ETyped e t) b
         (i0, t') <- getPrevResult
         emit $ Mul Times ( Int) i0 (LitInt (-1))
-        --let i = case i0 of
-        --          LitInt i0' -> i0'
-        --          _          -> error "lol" -- not possible
-        -- r' <- loadReg
-        --setPrevVal (LitInt ((-1)*i),  Int ) b
       else
         case e of
           (ELitDoub d) -> do
             compileExp (ETyped e t) b
             (r', _)  <- getPrevResult
-            -- r' <- loadReg
             compileExp (ELitDoub (-1.0)) b -- todo same b as setprevval rly?
-            (r2', _) <- getPrevResult
+            (r2', _) <- getPrevResult -- todo should be safe since the literal ends up in a temp reg
             emit $ Mul Times ( Doub) r'  r2'
             setPrevVal (r',  Doub) b
           _            -> compileExp (ETyped (EMul e Times (ELitDoub (-1.0)) ) t) b
@@ -1879,10 +1823,10 @@ compileExp e0 b = case e0 of
 
   Not (ETyped e Bool) -> do
     case e of
-      (ELitTrue)  -> setPrevVal (LitBool False,  Bool) b -- idk if b or false
+      (ELitTrue)  -> setPrevVal (LitBool False,  Bool) b
       (ELitFalse) -> setPrevVal (LitBool True,  Bool) b
       _           -> do
-        compileExp e True -- todo why not false?
+        compileExp e True -- todo why not false? probably doesnt matter
         (r, t) <- getPrevResult
         -- mov value to RAX, because you cant to neg on [RBP + 8] for example
         -- we dont know which type of variable it is until after register allocation

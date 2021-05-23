@@ -9,7 +9,7 @@ I use bitarrays to represent the def-, use-, succsessor- and livein-sets, and th
 the successor set for example; There can be 200+ lines of code, each line has a successor set with bool 200 elements
 So just from this we get 40 000 elements.
 
-I'm still failing some tests however (fail 12/36 good tests), they either print the wrong thing, or they never "halt".
+I'm still failing some tests however (fail 11/36 good tests), they either print the wrong thing, or they never "halt".
 I'll make sure to fix this until the final deadline
 
 So you cant run the test suite as normal since it wont halt.
@@ -23,13 +23,12 @@ But I can provide a list tests that fail here, if you just want to inspect the b
     core001     no halt
     core010     wrong print
     core012     prints nothing
-    core013     no halt
+    core013     prints nothing
     core015     wrong print
-    core016     no halt
     core017     no halt
     core019     no halt
     core029     no halt
-    core031     print infinitely
+    core031     wrong print
     intarith4   wrong print
     intarith5   no halt
 
@@ -104,16 +103,44 @@ The details of the register allocation follows the algorithm presented in the le
 the compile function compiles all functions, it appends imports, 
 strings constants and the functions themselves
 
+
+
+
+
+
+
 ---------------------- types + state:
-we use a state monad that containts variable / register enums, 
+we use a state monad that contains variable / register enums, 
 compiled code and function / variable signatures.
 We also have a "Code" data type that contains all relevant llvm 
 instruction templates.
+
+
+--------- Changes:
+
+We added a Parameter type, which is used to distinguish temporary registers that need to be "register-allocated"
+and parameters that dont change.
+We added a "value-data-type" "X86" that can be concrete registers like RAX, stack variables, parameters and local variables.
+These are the data values we get after performing register allocation optimization.
+We added "output-code" types for x86 rather than llvm.
+
+
+
+
+
 
 ---------------------- functions for interacting with the state:
 we have methods for getting / fetching the "previous value". This lets use
 use the result from an instruction in the next one. We also have functions for 
 adding / getting variables, registers and labels.
+
+--------- Changes:
+We updated the "loadReg" function to load values to RAX or XMM0 so that we avoid illegal operations like "add [RSP + 8], [RSP + 16]"
+
+
+
+
+
 
 ---------------------- functions for converting code to "llvm strings":
 these functions convert our "llvm instruction templates" to strings
@@ -131,11 +158,39 @@ The reason why it is this way is because I couldnt figure out how to
 perform execState / runState in such a way that I could return params
 from compileFun.
 
+
+
+----------- Changes:
+We reset "next register" and "next parameter" for each function, since you dont need to worry about conflicting names.
+At the start and end of each function we save, respectively restore RBP.
+As mentioned, we perform the register allocation optimization at the end of the compileDun function.
+
+
+
+
+
+
+
+
+
+
+
 ---------------------- functions for compiling statements:
 given a statement, we compile it by emitting llvm instructions directly or 
 by calling the compileExp function. The compileStm function returns a bool
 that tells us if the statement guarantees a return. If it does, then we can
 omit the following statements, as mentioned before.
+
+
+
+--------- Changes:
+We made a function "fixReturnReg" that moves the result to RAX / XMM0 when compiling return statements.
+
+
+
+
+
+
 
 ---------------------- functions for compiling expressions:
 The compileExp function compiles expressions to llvm code. The function takes
@@ -144,3 +199,26 @@ argument for a different expression. If so, then we make sure that it is
 not overridden by subsequent "arguments" by passing this bool to the
 setPrevVal function. This makes it so that we append the argument to the end
 of the list, rather than ovverriding the last element.
+
+
+
+-------- Changes:
+we use a function "defaultReg" that simply gives RAX, RBX, XMM0 and XMM1 as standard for binary operations.
+for binary operations:
+    We first compile the teh first argument and mov it to a temporary register to prevent 
+    the second argument from overriding it.
+    We then move the second argument away from RAX/XMM0 if its there so we can place the first argument there.
+    then we "print" the instruction
+We always "mov" literals (like 3.456 and 7) to a temporary register to avoid trouble with instructions that cant handle literals
+    its probably better to not instead only "mov" if 100% necassary to make the code less bloated.
+when compiling function calls "EApp", 
+    if were calling an extern function from the runtime we:
+        push and pop registers the caller is responsible for.
+        and we push the argument to RDI
+        Right now we push all "caller" registers even if we dont use them, which creates a lot of spaghetti, I hope to fix this next week.
+    if we are calling a function defined inside the program:
+        we push and pop RCX to align the stack if theres an odd number of arguments 
+        we push int arguments to the stack using "push"
+        we push double arguments to the stack using 
+            sub rsp 8
+            mov [RSP], arg
