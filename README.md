@@ -13,6 +13,6 @@ These are the essential steps of optimization algorithm:
 * Perform static liveness analysis to see which virtual registers are used simultaneously.
 * Create a graph where each node is a virtual register, and add edges (A, B) for each pair of nodes A and B that are being used simultaneously.
 * Perform a k-coloring algorithm on the graph, every node gets mapped to a color were each color represents a PHYISICAL register in x86-64.
-* Then we update the code with the mapping of virtual registers to physical registers.
+* Then we update the code with the mapping of virtual registers to physical registers. 
 
 you can see the code [here](https://github.com/isaksc2/TDA283/blob/main/compiler/src/X86Backend.hs). 
