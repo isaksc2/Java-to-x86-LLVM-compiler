@@ -568,8 +568,8 @@ registerAlloc = do
   (d, iu, du, s) <- defUseSucc
   --error (show $ map (\x -> map (\(b,i) -> if (b) then show i ++ show i else "") (zip x [0..])) du)
   -- calculate liveness
-  li             <- liveness (d, iu, s)
-  ld             <- liveness (d, du, s)
+  li             <- liveness (d, iu, s) False
+  ld             <- liveness (d, du, s) True
   -- todo : only the second liveness is slow
   -- get interference graph
   let ii         = interference li
@@ -801,7 +801,7 @@ defUseSucc = do
       --(MovF     v1   v2) -> combine t v1 v2
       (DivD     v1   v2) -> combine ( Doub) v1 v2
       (DivI     v      ) -> combine ( Int)  v  (LitInt (-1)) -- -1 is dummy value
-      (MovF2     _   v2) -> combine ( Doub) v2 (LitDoub (-1.0))
+      (MovF2     v1   v2) -> combine ( Doub) v2 v1 --(LitDoub (-1.0))
       (MovF3    v1    _) -> combine ( Doub) v1 (LitDoub (-1.0))
       (Pop    t       v) -> combine t          v  (LitInt (-1)) 
       (Push   t       v) -> combine t          v  (LitInt (-1)) 
@@ -856,8 +856,9 @@ defUseSucc = do
 -- todo make sure u do from backwards to top
 liveness 
   :: ([[Bool]], [[Bool]], [[Bool]]) -- def, use and succ- sets
+  -> Bool
   -> Compile [[Bool]]               -- liveness for each line
-liveness dus = do
+liveness dus b = do
   o           <- gets output
   --if(head o == Comment "") then error (show "asdad") else return ()
   let n_ins    = length o
@@ -1175,7 +1176,7 @@ registerOutput typ realRegs tempRegs colorMap = do
                 (Add op t v1 v2) -> (Add op t  (swap t          v1 r) (swap t v2 r))
                 (Mul op t v1 v2) -> (Mul op t  (swap t          v1 r) (swap t v2 r))
                 (Cmp    t v1 v2) -> (Cmp    t  (swap t          v1 r) (swap t v2 r))
-                (MovF2    v1 v2) -> (MovF2     v1                     (swap ( Doub) v2 r))
+                (MovF2    v1 v2) -> (MovF2     (swap ( Doub) v1 r)                    (swap ( Doub) v2 r)) -- v1    swap v2
                 (MovF3    v1 v2) -> (MovF3     (swap ( Doub) v1 r) v2)
                 (DivD     v1 v2) -> (DivD      (swap ( Doub) v1 r) (swap ( Doub) v2 r))
                 (DivI     v    ) -> (DivI      (swap ( Int)  v  r)) 
@@ -1675,7 +1676,52 @@ compileExp e0 b = case e0 of
         emit $ Push ( Int) (X86 R8)
         emit $ Push ( Int) (X86 R9)
         emit $ Push ( Int) (X86 R10)
-        emit $ Push ( Int) (X86 R11)
+        emit $ Push ( Int) (X86 R11) -- [XMM2, XMM3, XMM4, XMM5, XMM6, XMM7, XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15]
+
+        emit $ Add Minus (Int) (X86 RSP) (LitInt 8) 
+        emit $ Mov Doub (X86 XMM2) (X86 (Stack 0))
+
+        emit $ Add Minus (Int) (X86 RSP) (LitInt 8) 
+        emit $ Mov Doub (X86 XMM3) (X86 (Stack 0))
+
+        emit $ Add Minus (Int) (X86 RSP) (LitInt 8) 
+        emit $ Mov Doub (X86 XMM4) (X86 (Stack 0))
+
+
+        emit $ Add Minus (Int) (X86 RSP) (LitInt 8) 
+        emit $ Mov Doub (X86 XMM5) (X86 (Stack 0))
+        {-
+
+        emit $ Add Minus (Int) (X86 RSP) (LitInt 8) 
+        emit $ Mov Doub (X86 XMM6) (X86 (Stack 0))
+
+        emit $ Add Minus (Int) (X86 RSP) (LitInt 8) 
+        emit $ Mov Doub (X86 XMM7) (X86 (Stack 0))
+
+        emit $ Add Minus (Int) (X86 RSP) (LitInt 8) 
+        emit $ Mov Doub (X86 XMM8) (X86 (Stack 0))
+
+        emit $ Add Minus (Int) (X86 RSP) (LitInt 8) 
+        emit $ Mov Doub (X86 XMM9) (X86 (Stack 0))
+
+        emit $ Add Minus (Int) (X86 RSP) (LitInt 8) 
+        emit $ Mov Doub (X86 XMM10) (X86 (Stack 0))
+
+        emit $ Add Minus (Int) (X86 RSP) (LitInt 8) 
+        emit $ Mov Doub (X86 XMM11) (X86 (Stack 0))
+
+        emit $ Add Minus (Int) (X86 RSP) (LitInt 8) 
+        emit $ Mov Doub (X86 XMM12) (X86 (Stack 0))
+
+        emit $ Add Minus (Int) (X86 RSP) (LitInt 8) 
+        emit $ Mov Doub (X86 XMM13) (X86 (Stack 0))
+
+        emit $ Add Minus (Int) (X86 RSP) (LitInt 8) 
+        emit $ Mov Doub (X86 XMM14) (X86 (Stack 0))
+
+        emit $ Add Minus (Int) (X86 RSP) (LitInt 8) 
+        emit $ Mov Doub (X86 XMM15) (X86 (Stack 0))
+        -}
       else return ()
     -- compile arguments and and make sure they dont override each other
     mapM_ (\e -> do
@@ -1684,8 +1730,8 @@ compileExp e0 b = case e0 of
                   -- move argument to rdi
                   if (isExtern)
                     then if (id == Ident "printDouble")
-                          then emit $ MovF2      prev (X86 RDI)
-                          else emit $ Mov ( Int) prev (X86 RDI) -- use same calling convention as runtime
+                          then emit $ Mov     Doub prev (X86 XMM0)
+                          else emit $ Mov (Int) prev (X86 RDI) -- use same calling convention as runtime
                     
                     else if (typ == Doub)
                       then do -- "push" doub manually
@@ -1700,6 +1746,52 @@ compileExp e0 b = case e0 of
       then emit $ Add Plus ( Int) (X86 RSP) (LitInt $ sum $ map (\x -> size ( x)) ts)
       else return ()
     -- restore registers
+
+    {-
+
+    emit $ Mov (Doub) (X86 (Stack 0)) (X86 XMM15)
+    emit $ Add Plus (Int) (X86 RSP) (LitInt 8)
+
+    emit $ Mov (Doub) (X86 (Stack 0)) (X86 XMM14)
+    emit $ Add Plus (Int) (X86 RSP) (LitInt 8)
+
+    emit $ Mov (Doub) (X86 (Stack 0)) (X86 XMM13)
+    emit $ Add Plus (Int) (X86 RSP) (LitInt 8)
+
+    emit $ Mov (Doub) (X86 (Stack 0)) (X86 XMM12)
+    emit $ Add Plus (Int) (X86 RSP) (LitInt 8)
+
+    emit $ Mov (Doub) (X86 (Stack 0)) (X86 XMM11)
+    emit $ Add Plus (Int) (X86 RSP) (LitInt 8)
+
+    emit $ Mov (Doub) (X86 (Stack 0)) (X86 XMM10)
+    emit $ Add Plus (Int) (X86 RSP) (LitInt 8)
+
+    emit $ Mov (Doub) (X86 (Stack 0)) (X86 XMM9)
+    emit $ Add Plus (Int) (X86 RSP) (LitInt 8)
+
+    emit $ Mov (Doub) (X86 (Stack 0)) (X86 XMM8)
+    emit $ Add Plus (Int) (X86 RSP) (LitInt 8)
+
+    emit $ Mov (Doub) (X86 (Stack 0)) (X86 XMM7)
+    emit $ Add Plus (Int) (X86 RSP) (LitInt 8)
+
+    emit $ Mov (Doub) (X86 (Stack 0)) (X86 XMM6)
+    emit $ Add Plus (Int) (X86 RSP) (LitInt 8)
+    -}
+
+    emit $ Mov (Doub) (X86 (Stack 0)) (X86 XMM5)
+    emit $ Add Plus (Int) (X86 RSP) (LitInt 8)
+
+    emit $ Mov (Doub) (X86 (Stack 0)) (X86 XMM4)
+    emit $ Add Plus (Int) (X86 RSP) (LitInt 8)
+
+    emit $ Mov (Doub) (X86 (Stack 0)) (X86 XMM3)
+    emit $ Add Plus (Int) (X86 RSP) (LitInt 8)
+
+    emit $ Mov (Doub) (X86 (Stack 0)) (X86 XMM2)
+    emit $ Add Plus (Int) (X86 RSP) (LitInt 8)
+
     emit $ Pop ( Int) (X86 R11)
     emit $ Pop ( Int) (X86 R10)
     emit $ Pop ( Int) (X86 R9)

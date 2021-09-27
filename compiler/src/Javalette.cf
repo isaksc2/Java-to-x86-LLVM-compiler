@@ -48,6 +48,12 @@ While.     Stmt ::= "while" "(" Expr ")" Stmt ;
 
 SExp.      Stmt ::= Expr  ";" ;
 
+SFor.      Stmt ::= "for (" Type Ident ":" Expr ")" Stmt ; --------------------------------------- array
+
+AssIndex.  Stmt ::= Ident "[" Expr "] =" Expr ;
+
+
+
 internal   Retting. Stmt ::= "[" Stmt ":" Integer "]" ; ------------------------------------------- edit
 
 
@@ -61,9 +67,15 @@ Bool.      Type ::= "boolean" ;
 
 Void.      Type ::= "void" ;
 
+List.      Type ::= Type "[]" ;                               --------------------------------------- array
+
+internal   Tuple.  Type ::= "tuple" ; ----------------------------------- array
+
 internal   String. Type ::= "string" ; --------------------------------------------------------- edit
 
 internal   Fun. Type ::= Type "(" [Type] ")" ;
+
+
 
 separator  Type "," ;
 
@@ -83,7 +95,13 @@ EApp.      Expr6 ::= Ident "(" [Expr] ")" ;
 
 EString.   Expr6 ::= String ;
 
+EList.     Expr6 ::= "new" Type "[" Expr "]" ;            --------------------------------------- array
+
 Neg.       Expr5 ::= "-" Expr6 ;
+
+ELen.      Expr5 ::= Expr6 "." "length" ;                     --------------------------------------- array
+
+EElem.     Expr5 ::= Expr6 "[" Expr "]" ;                  --------------------------------------- array
 
 Not.       Expr5 ::= "!" Expr6 ;
 
@@ -96,6 +114,8 @@ ERel.      Expr2 ::= Expr2 RelOp Expr3 ;
 EAnd.      Expr1 ::= Expr2 "&&" Expr1 ;
 
 EOr.       Expr ::= Expr1 "||" Expr ;
+
+
 
 internal   ETyped. Expr ::= "[" Expr ":" Type "]" ; ------------------------------------------- edit
 

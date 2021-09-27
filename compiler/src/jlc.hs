@@ -13,18 +13,20 @@ import Javalette.ErrM           (pattern Ok, pattern Bad)
 import Javalette.Abs
 
 import TypeChecker
---import writeX86Backend
+--import LlvmBackend
 import X86Backend
 
 main :: IO ExitCode
 main = do
 
   ----------- for running 1 specific test in the docker ------------------------
-  program <- readFile "testsuite/good/core031.jl"
+  --program <- readFile "testsuite/good/core012.jl"
 
 
   -------------------------- for debugging ----------------------------------------
-  --program <- readFile "../../test/testsuite/good/core031.jl"
+  program <- readFile "../../test/testsuite/good/intarith5.jl"
+
+  --let program = "int main() {printDouble(13.5); return 0;}"
 
 
   ---------------- for verifying that the register allocation works ---------------

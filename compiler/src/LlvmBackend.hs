@@ -33,8 +33,8 @@ compile (Program defs) = do
   let globs = intercalate "" (map snd code)
   -- functions
   let funcs = unlines (map fst code)
-  -- built in functions (todo not hardcode)
-  let decl = unlines ["declare void @printInt(i32)", "declare void @printDouble(double)", "declare void @printString(i8*)", "declare i32 @readInt()", "declare double @readDouble()"]
+  -- built in functions
+  let decl = unlines ["declare void @printInt(i32)", "declare void @printDouble(double)", "declare void @printString(i8*)", "declare i32 @readInt()", "declare double @readDouble()", "declare i8* @calloc(i32, i32)"]
   -- append everything and remove the last 2 extra newlines
   reverse $ drop 2 $ reverse $ decl ++ globs ++ "\n" ++ funcs
   where
@@ -65,15 +65,16 @@ newtype Label = L {theLabel :: Int}
   deriving (Eq, Enum, Show)
 
 newtype Register = R {theRegister :: Int}
-  deriving (Eq, Enum, Show)
+  deriving (Eq, Enum, Show, Ord)
 
 -- register for strings
 newtype GlobalRegister = G Int
   deriving (Eq, Enum, Show)
 
 -- index for getelementptr
-newtype Index = I [Int]
+newtype Index = I [Value]
   deriving (Show)
+
 
 
 ---------------------- data
@@ -107,15 +108,16 @@ initSt s = St { sig          = s
 
 builtin :: [(Ident, FunHead)]
 builtin =
-  [ (Ident "printInt",     FunHead (Ident "printInt") $ FunType Void [Int])
-  , (Ident "printDouble",  FunHead (Ident "printDouble") $ FunType Void [Doub])
-  , (Ident "printString",  FunHead (Ident "printString") $ FunType Void [String])
-  , (Ident "readInt"   ,   FunHead (Ident "readInt") $ FunType Int [])
-  , (Ident "readDouble",   FunHead (Ident "readDouble") $ FunType Doub [])
+  [ (Ident "printInt",     FunHead (Ident "printInt"   ) $ FunType Void  [Int])
+  , (Ident "printDouble",  FunHead (Ident "printDouble") $ FunType Void  [Doub])
+  , (Ident "printString",  FunHead (Ident "printString") $ FunType Void  [String])
+  , (Ident "readInt"   ,   FunHead (Ident "readInt"    ) $ FunType Int   [])
+  , (Ident "readDouble",   FunHead (Ident "readDouble" ) $ FunType Doub  [])
+  , (Ident "calloc"    ,   FunHead (Ident "calloc"     ) $ FunType Tuple [Int, Int])
   ]
 
 
-data LLVMType = Lit Type | Ptr LLVMType
+data LLVMType = Lit Type | Ptr LLVMType | Struct Type
   deriving(Show, Eq)
 
 -- convert function to a slightly different type.
@@ -153,10 +155,11 @@ data Code
   | Branch Label
   | BranchCond Value Label Label
   | Global GlobalRegister LLVMType Value
-  | GetElementPointer Register String GlobalRegister Index
+  | GetElementPointer  Register String GlobalRegister Index -- get ptr for string
+  | GetElementPointerL Register Type Register Index         -- get ptr for arrays 
+  | Cast Register LLVMType Register LLVMType                -- bit cast
   | Comment String
     deriving (Show)
-
 
 
 
@@ -182,13 +185,22 @@ getPrevResult = do
   return $ head allArgs
 
 
--- load register (if it's variable, then load)
-loadReg :: (Value, LLVMType) -> Compile Value ---------- todo, var = reg ptr, temp = reg lit
+-- dereference pointer types
+loadReg :: (Value, LLVMType) -> Compile Value
+-- lists should always have 1 ptr
+loadReg (    r,      Ptr (Lit (List a))) = return r
+-- unnest list with 2 pointers
+loadReg (    Reg r, Ptr (Ptr (Lit (List a)))) = do
+  r' <- newRegister
+  emit $ Load r' (Ptr (Lit (List a))) r
+  return (Reg r')
+-- cant unnest 
+loadReg (r, Lit t) = return r
+-- unnest non-list values
 loadReg (Reg r, Ptr (Lit t)) = do 
   r' <- newRegister
   emit $ Load r' (Lit t) r
   return (Reg r')
-loadReg (r, Lit t) = return r
 
 
 -- remove arguments / previous results
@@ -238,7 +250,10 @@ newVar x r t = modify $ \st@St { cxt = (b : bs) } -> st { cxt = ((x, r, t) : b) 
 lookupVar :: Ident -> Compile (Register, LLVMType)
 lookupVar id = do 
   c <- gets cxt
-  return (fromJust $ cxtContains id c)
+  let r = cxtContains id c
+  if (isNothing r)
+    then error (show id)
+    else return $ fromJust r
   where
     -- context contains var?
     cxtContains :: Ident -> [[(Ident, Register, LLVMType)]] -> Maybe (Register, LLVMType)
@@ -279,6 +294,28 @@ impossible :: Code -> String
 impossible a = error $ "impossible code " ++ toLLVM a
 
 
+-- get the amount of space each type needs
+bytes :: Type -> Int
+bytes Int  = 4
+bytes Bool = 1
+bytes Doub = 4
+bytes _    = error "bytes unimplemented"
+
+
+-- wrap lists with a pointer, do nothing to other values
+pointerList :: Type -> LLVMType
+pointerList (List t) = Ptr (Lit (List t))
+pointerList       t  =      Lit       t
+
+-- get the register of a value
+val2Reg :: Value -> Register
+val2Reg (Reg r) = r
+
+-- get the inner type of a list
+typeOfArray :: LLVMType -> Type
+typeOfArray      (Ptr (Lit (List t)))  = t
+typeOfArray (Ptr (Ptr (Lit (List t)))) = t
+
 
 -------------------------------------------------- convert code
 
@@ -298,6 +335,8 @@ instance ToLLVM Type where
     Bool   -> "i1"
     Doub   -> "double"
     String -> "i8*"
+    Tuple  -> "i8*"
+    List t -> listType t
 
 -- add proper prefix to mulop
 prefixMulOp :: LLVMType -> MulOp -> String
@@ -330,10 +369,12 @@ instance ToLLVM RelOp where
     NE    -> "ne"
 
 instance ToLLVM Index where
-  toLLVM (I (i:[])) = toLLVM (Lit Int) ++ " " ++ show i
-  toLLVM (I (i:is)) = toLLVM (Lit Int) ++ " " ++ show i ++ ", " ++ toLLVM (I is)
+  toLLVM (I (i:[])) = toLLVM (Lit Int) ++ " " ++ toLLVM i
+  toLLVM (I (i:is)) = toLLVM (Lit Int) ++ " " ++ toLLVM i ++ ", " ++ toLLVM (I is)
+
 
 instance ToLLVM FunHead where
+  toLLVM (FunHead (Ident f) (FunType (List t) ts)) = error (show t)
   toLLVM (FunHead (Ident f) (FunType t ts)) = "define " ++ toLLVM t ++ " @" ++ f ++ "(" ++ ( reverse ( drop 2 ( reverse (((\t -> t ++ ", ") . toLLVM) =<< ts)))) ++ ")"
 
 instance ToLLVM Label where
@@ -367,6 +408,11 @@ instance ToLLVM Arguments where
 stringType :: String -> String
 stringType s = "[" ++ show ( (length s) + 1) ++ " x i8]"
 
+-- print type of getelementptr argument
+listType :: Type -> String
+listType (List t) = error (show t)
+listType t    =  "{i32, [ 0 x " ++ toLLVM t ++ " ]}"
+
 instance ToLLVM Code where
   toLLVM = \case
     Store t from to                        -> "store " ++ toLLVM t ++ " "  ++ toLLVM from ++ " , " ++ toLLVM (Ptr t) ++ " " ++ toLLVM to
@@ -386,9 +432,10 @@ instance ToLLVM Code where
     BranchCond c lb1 lb2                   -> "br i1 " ++ toLLVM c ++ ", label %" ++ toLLVM lb1 ++ ", label %" ++ toLLVM lb2
     Global adr t (LitString s)             -> toLLVM adr ++ " = internal constant " ++ stringType s ++  " c\"" ++ s ++ "\\00\""
     GetElementPointer r' s r i             -> toLLVM r' ++ " = getelementptr " ++ stringType s ++ ", " ++ stringType s ++ "* " ++ toLLVM r ++ ", " ++ toLLVM i
+    GetElementPointerL r' t r i            -> toLLVM r' ++ " = getelementptr " ++ listType t ++ ", " ++ listType t ++ "* " ++ toLLVM r ++ ", " ++ toLLVM i
+    Cast r1 t1 r2 t2                       -> toLLVM r1 ++ " = bitcast " ++ toLLVM t1 ++ " " ++ toLLVM r2 ++ " to " ++ toLLVM t2
     Comment ""                             -> ""
     Comment s                              -> "; " ++ s
-
 
 
 
@@ -430,6 +477,7 @@ blank = comment ""
 ------------------------------------------------------------------------------- compile functions
 
 
+
 -- compile functions
 compileDefs :: St -> [TopDef] -> [(String, String)]
 compileDefs st [] = []
@@ -443,9 +491,11 @@ compileDefs st (d:ds) = do
 compileDef :: St -> TopDef -> (String, String, St)
 compileDef st def@(FnDef t (Ident f) args (Block ss)) = do
   -- pair each argument with a parameter name
-  let args' = Args $ zip (map (\(Argument t id) -> (Lit t)) args) (map (\x -> Reg x) (params st')) -- kinda ugly to have have params here, just do it in compilefun todo
+  let args' = Args $ zip (map (\(Argument t id) -> pointerList t) args) (map (\x -> Reg x) (params st')) -- kinda ugly to have have params here, just do it in compilefun todo
   -- print the function header
-  let func  = intercalate "" [ "define " ++ toLLVM t ++ " @" ++ f ++ "(" ++ toLLVM args' ++ " ) {\n", "entry:\n", unlines $ map (indent . toLLVM) $ reverse $ (output st'), "}\n"]
+  -- if list, then print as pointer
+  let t2 = pointerList t 
+  let func  = intercalate "" [ "define " ++ toLLVM t2 ++ " @" ++ f ++ "(" ++ toLLVM args' ++ " ) {\n", "entry:\n", unlines $ map (indent . toLLVM) $ reverse $ (output st'), "}\n"]
   -- print the string constants
   let glob  = unlines $ map toLLVM $ reverse (globalOut st')
   (func, glob, st')
@@ -465,9 +515,9 @@ compileFun (Ident f) t0 args ss = do
   -- make a new variable and alloc memory for each parameter:
   mapM_ (\(Argument t' x, r) -> do
                                   r' <- newRegister
-                                  newVar x r' (Ptr (Lit t'))
-                                  emit $ Alloca r' (Lit t')
-                                  emit $ Store (Lit t') (Reg r) r'
+                                  newVar x r' (Ptr (pointerList t'))--(Ptr (Lit t'))
+                                  emit $ Alloca r' (pointerList t') -- (Lit t')
+                                  emit $ Store     (pointerList t') (Reg r) r'--(Lit t') (Reg r) r'
                                 ) arg_reg
   -- store current parameters
   modify $ \st -> st { params = regs}
@@ -498,25 +548,38 @@ compileFun (Ident f) t0 args ss = do
 -- help function for compiling variable declaration
 compileDecl :: Type -> Item -> Compile ()
 compileDecl t (Init id (ETyped e _)) = do
+  -- wrap type in pointer if its a list
+  (typ, isList) <- case t of
+                    List t' -> return ((Ptr (Lit t)), True)
+                    t'       -> return      (Lit t , False)
   -- compile expression and make new variable
   compileExp (ETyped e t) False
-  r  <- newRegister
-  newVar id r (Ptr (Lit t))
-  emit $ Alloca r (Lit t)
-  p  <- getPrevResult
-  p' <- loadReg p
-  emit $ Store (Lit t) p' r
+  r <- newRegister
+  newVar id r (Ptr typ)
+  emit $ Alloca r typ
+  (p, pp)  <- getPrevResult
+  -- dereference pointer if needed
+  source <- if (isList)
+              then return p
+              else loadReg (p,pp)
+  -- store in new variable
+  emit $ Store typ source r
+
+
+
 
 compileDecl t (NoInit id) = do
+  -- wrap type in pointer if its a list
+  let typ = pointerList t
   -- just create new variable
   r <- newRegister
-  newVar id r (Ptr (Lit t))
-  emit $ Alloca r (Lit t)
+  newVar id r (Ptr typ)
+  emit $ Alloca r typ
 
 
 
 -- compile list of statements 
--- Bool: do these statements guarantee a return statement?
+-- Bool result: do these statements guarantee a return statement?
 compileStms :: [Stmt] -> Compile Bool
 compileStms []        = return False
 compileStms (s : ss') = do
@@ -538,7 +601,8 @@ compileStm (Retting s0 ret) = do
       compileExp e False
       r  <- getPrevResult
       r' <- loadReg r
-      emit $ Return (Lit t) r'
+      let t' = pointerList t
+      emit $ Return t' r'
       return True
 
 
@@ -659,12 +723,100 @@ compileStm (Retting s0 ret) = do
       (a, t) <- lookupVar x
       r      <- getPrevResult
       r'     <- loadReg r
-      emit $ Store (Lit typ) r' a
+      emit $ Store (pointerList typ) r' a
       return False
 
 
     Incr i -> incDecr i Plus
     Decr i -> incDecr i Minus
+
+
+    
+    SFor typ id e s -> do
+      -- labels
+      start <- newLabel
+      t     <- newLabel
+      f     <- newLabel
+      -- create variable for counting
+      count  <- newRegister
+      emit $ Alloca count (Lit Int)
+      emit $ Store (Lit Int) (LitInt 0) count
+      emit $ Branch start
+
+      -- check condition
+      emit $ Label start
+      -- load count
+      count' <- newRegister
+      emit $ Load count' (Lit Int) count
+      -- load length
+      compileExp (ELen e) False
+      len <- getPrevResult
+      len' <- loadReg len
+      -- count < length ?
+      cmp <- newRegister
+      emit $ Compare cmp LTH (Lit Int) (Reg count') len'
+      emit $ BranchCond (Reg cmp) t f
+
+      -- inside loop
+      emit $ Label t
+      -- add empy block for varaibles
+      modify $ \st -> st { cxt = [] : cxt st }
+      -- create temp variable for element
+      elem <- newRegister
+      newVar id elem (Ptr (Lit typ))
+      emit $ Alloca elem (Lit typ)
+      -- load array
+      compileExp e False
+      (e', t0) <- getPrevResult
+      e0 <- loadReg (e', t0)
+      -- get the register
+      let e'' = val2Reg e0
+      -- calculate index
+      r <- newRegister
+      let index = (I [LitInt 0, LitInt 1, (Reg count')]) 
+      -- get the element
+      emit $ GetElementPointerL r typ e'' index
+      r' <- newRegister
+      emit $ Load r' (Lit typ) r
+      -- store element in temp var
+      emit $ Store (Lit typ) (Reg r') elem
+
+      -- compile the actual loop statements
+      compileStm s
+      -- remove outer most block
+      modify $ \st -> st { cxt = tail $ cxt st }
+      -- next index
+      count'' <- newRegister
+      emit $ Add count'' Plus (Lit Int) (Reg count') (LitInt 1)
+      emit $ Store (Lit Int) (Reg count'') count
+      -- go back to condition
+      emit $ Branch start
+      -- after loop
+      emit $ Label f
+      return False
+
+
+
+
+
+    AssIndex id e2 new -> do
+      -- get array
+      (e1, t) <- lookupVar id
+      -- get the type of the list
+      let t' = typeOfArray t
+      -- get element address
+      compileExp (EElem (EVar id) e2) False
+      (adr, t0) <- getPrevResult
+      -- get the address
+      let adr' = val2Reg adr
+      -- compile new value
+      compileExp new False
+      new' <- getPrevResult
+      new'' <- loadReg new'
+      -- store new value
+      emit $ Store (Lit t') new'' adr'
+      return False
+      
 
 
     Empty -> return False
@@ -701,19 +853,20 @@ incDecr i op = do
 -- helper: emit add / mul / rel expression.
 emitBinaryOp :: Type -> Operator -> Expr -> Expr -> Bool -> Compile ()
 emitBinaryOp t op' e1 e2 b = do
-  -- compile arguments
+  -- compile arg 1
   compileExp e1 True
+  r1 <- getPrevResult
+  arg1 <- loadReg r1
+  -- compile arg 2
   compileExp e2 True
-  allArgs <- gets prevResult
-  args'   <- mapM (\x -> loadReg x) $ take 2 allArgs
-  let [arg1, arg2] = args'
-  -- create result register
+  r2 <- getPrevResult
+  arg2 <- loadReg r2
   r <- newRegister
   -- compile and remove arguments
   case op' of
-    Ao op -> emit $ Add     r op (Lit t) arg2 arg1
-    Mo op -> emit $ Mul     r op (Lit t) arg2 arg1
-    Ro op -> emit $ Compare r op (Lit t) arg2 arg1
+    Ao op -> emit $ Add     r op (Lit t) arg1 arg2
+    Mo op -> emit $ Mul     r op (Lit t) arg1 arg2
+    Ro op -> emit $ Compare r op (Lit t) arg1 arg2
   removeArgs 2
   setPrevVal (Reg r, (Lit t)) b
 
@@ -737,7 +890,7 @@ compileExp e0 b = case e0 of
     adr  <- newGlobalRegister
     emitGlobal $ Global adr (Lit String) (LitString s)
     adr' <- newRegister
-    emit $ GetElementPointer adr' s adr $ I [0, 0]
+    emit $ GetElementPointer adr' s adr $ I [LitInt 0, LitInt 0]
     setPrevVal (Reg adr', Lit String) b
 
 
@@ -754,17 +907,17 @@ compileExp e0 b = case e0 of
     mapM_ (\e -> compileExp e True) es
     allArgs <- gets prevResult
     args    <- mapM (\x -> loadReg x) (reverse $ take n_args allArgs)
-    -- fix types
-    let ts' = map (\x -> (Lit x)) ts
+    -- translate types to LLVMType
+    let ts' = map (\x -> (pointerList x)) ts
     let args' = zip ts' args
     -- if void function, then no need to save the result
     if (t == Void)
       then do
-        emit $ CallVoid (Lit t) id (Args args')
+        emit $ CallVoid (pointerList t) id (Args args')
         removeArgs n_args
       else do
         r <- newRegister
-        emit $ Call r (Lit t) id (Args args')
+        emit $ Call r (pointerList t) id (Args args')
         removeArgs n_args
         setPrevVal (Reg r, (Lit t)) b
 
@@ -884,8 +1037,80 @@ compileExp e0 b = case e0 of
     removeArgs 1
     setPrevVal (Reg result, Ptr (Lit Bool)) b
 
+  EList t e -> do
+    -- size of each element
+    let size' = ELitInt (fromIntegral $ bytes t)
+    -- extra array length = length + 1 (for .length variable), do +4 for bools since they are only 1 byte long
+    offset <- case t of 
+                Bool -> return 4
+                _ -> return 1
+    -- calculate final length
+    let len = case t of 
+                -- for doub: (length*2 + 1)*4
+                Doub -> (ETyped (EAdd (ETyped (EMul e Times (ETyped (ELitInt 2) Int)) Int) Plus (ETyped (ELitInt offset) Int)) Int)
+                -- for int:  (length + 1)*4 
+                -- for bool: (length + 4)*1 
+                _    -> (ETyped (EAdd e Plus (ETyped (ELitInt offset) Int)) Int)
+    -- call calloc
+    let args      = [len, size']    
+    let call = (ETyped (EApp (Ident "calloc") args) Tuple)
+    compileExp call b 
+    (c', ct') <- getPrevResult
+    -- get the location of the heap memory
+    let c''' = val2Reg c'
+    -- cast i8* to {i32, [...]}
+    c'' <- newRegister
+    emit $ Cast c'' ct' c''' (Ptr $ Lit (List t))
+    -- set length variable
+    compileExp e b 
+    e' <- getPrevResult
+    e'' <- loadReg e'
+    l <- newRegister
+    emit $ GetElementPointerL l t c'' (I [LitInt 0, LitInt 0])
+    emit $ Store (Lit Int) e'' l
+    -- done
+    setPrevVal (Reg c'', Ptr (Lit (List t))) b 
+
+
+
+  EElem e1 e2 -> do
+    -- compile array
+    compileExp e1 b 
+    (e1', t) <- getPrevResult
+    e11 <- loadReg (e1', t)
+    -- get the address of the array
+    let e1''' = val2Reg e11
+    -- get the type
+    let t'' = typeOfArray t
+    -- compile index
+    compileExp (ETyped e2 Int) b 
+    e2' <- getPrevResult
+    e2'' <- loadReg e2'
+    -- get elem
+    r <- newRegister
+    let index = (I [LitInt 0, LitInt 1, e2''])
+    emit $ GetElementPointerL r t'' e1''' index
+    setPrevVal (Reg r, Ptr (Lit t'')) b
+
+
+
+  ELen e1 -> do
+    -- compile array
+    compileExp e1 b
+    (e1', t) <- getPrevResult
+    res <- loadReg (e1', t)
+    -- get the address of the array
+    let e1'' = val2Reg res
+    -- get the type of the array
+    let t'' = typeOfArray t
+    -- get the length
+    r <- newRegister
+    emit $ GetElementPointerL r t'' e1'' (I [LitInt 0, LitInt 0])
+    setPrevVal (Reg r, Ptr (Lit Int)) b
+
 
   ETyped e _ -> compileExp e b
 
 
   e          -> error $ "not implemented compileexp " ++ show e
+

@@ -1,0 +1,93 @@
+This file describes how the llvm backend was modified to have 1d-array support
+
+-- Features:
+    assume int[] a = (new int[10]) (for example)
+
+    You can get the length of an array using both:
+        a.length   and 
+        (new int[10]).length
+
+    you can copy entire arrays or just elements also
+
+    for-each loops can take both of these as "argument":
+        a
+        (new int[10])
+
+    we use calloc to allocate heap memory for arrays.
+    No garbage collection is used.
+
+
+
+
+-- Changes from lab 2 files:
+We have added support for these statements:
+    SFor: for-each loop
+    AssIndex: assign value to index of list
+We have added support for these expressions:
+    EList: new int[3] for example
+    ELen: length of array
+    EElem: get elem of array
+2 code instruction / code types were added:      
+    GetElementPointerL: for getting an element / the length of an array
+    Cast : casting the resulting address from calloc to an array type.
+
+
+The rest is mostly straight forward, but I included a copy of the description of the program structure from lab 2 below, if you want to read it again:
+
+
+
+-- Lab 2 file structure
+LlvmBackend.hs compiles the llvm code. it has 6 main sections: 
+entry point
+types + state
+functions for interacting with the state
+functions for converting code to "llvm strings"
+functions for saving (emitting) code to the state
+functions for compiling functions
+functions for compiling statements
+functions for compiling expressions
+
+-- entry point:
+the compile function compiles all functions, it appends imports, 
+strings constants and the functions themselves
+
+-- types + state:
+we use a state monad that containts variable / register enums, 
+compiled code and function / variable signatures.
+We also have a "Code" data type that contains all relevant llvm 
+instruction templates.
+
+-- functions for interacting with the state:
+we have methods for getting / fetching the "previous value". This lets use
+use the result from an instruction in the next one. We also have functions for 
+adding / getting variables, registers and labels.
+
+-- functions for converting code to "llvm strings":
+these functions convert our "llvm instruction templates" to strings
+
+-- functions for saving (emitting) code to the state:
+these functions take a llvm instruction template, turns it into a string and 
+puts it in the state.
+
+-- functions for compiling functions:
+given a function, we compile its header and its statements.
+I'm a little unsatisfied with the use of "params" in the state and the
+helper function compileFun. Ideally you would merge compileFun and 
+compileDef to avoid needing the "params" variable in the state.
+The reason why it is this way is because I couldnt figure out how to
+perform execState / runState in such a way that I could return params
+from compileFun.
+
+-- functions for compiling statements:
+given a statement, we compile it by emitting llvm instructions directly or 
+by calling the compileExp function. The compileStm function returns a bool
+that tells us if the statement guarantees a return. If it does, then we can
+omit the following statements, as mentioned before.
+
+-- functions for compiling expressions:
+The compileExp function compiles expressions to llvm code. The function takes
+a bool argument that tells us if the expression is used as an operand or 
+argument for a different expression. If so, then we make sure that it is 
+not overridden by subsequent "arguments" by passing this bool to the
+setPrevVal function. This makes it so that we append the argument to the end
+of the list, rather than ovverriding the last element.

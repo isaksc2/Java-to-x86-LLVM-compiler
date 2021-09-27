@@ -1,6 +1,8 @@
 For lab 3/C I (tried) implementing a x86-64 backend with register allocation optimization
 
-I'm still failing some tests (fails 8/36 good tests), they either print the wrong thing, or they never "halt".
+
+As for the x86 extension:
+I'm still failing some tests (fails 7/36 good tests), they either print the wrong thing, or they never "halt".
 I'll make sure to fix this until the final deadline
 
 These are the tests that fail:
@@ -10,17 +12,15 @@ These are the tests that fail:
     core017     no halt
     core019     no halt
     core029     no halt
-    core031     wrong print (almost works, it just prints 0.0 instead of 100.0)
     intarith5   prints nothing
 
 Some known issues:
-    All my double literals become 0.0
-    ?
+    i push all registers manually before calling a function, it makes the code slow and ugly.
 
 So running the docker like normal won't work since it will get stuck on some tests.
 If you want to try some tests, you can open jlc.hs and look in the main do-block on line 20:
-    the default input lets you run that given test in the docker, the one used right now is core031.jl
-        it fails, but it shows that we "almost" get the correct output
+    the default input lets you run that given test in the docker, the one used right now is intarith5.jl
+        it fails, since it prints nothing
     the second input option can be used when running jlc.hs outside the docker (you have to change the path on your computer)
     the third option can be used to verify that the register allocation optimization works (more on that below)
     the fourth option is used to test the docker like normal, there's no point in using it now, as mentioned.

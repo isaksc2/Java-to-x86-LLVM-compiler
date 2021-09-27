@@ -11,17 +11,20 @@ files=a.txt
 # List of goals not corresponding to file names.
 .PHONY : all clean distclean
 
-a.txt : 
-	cd src; make; mv jlc_x64 ../
+a.txt :
+	cd src; make jlc; mv jlc ../
+	cd src; make jlc_x64; mv jlc_x64 ../
 
 all :
-	cd src; make; mv jlc_x64 ../
+	cd src; make jlc; mv jlc ../
+	cd src; make jlc_x64; mv jlc_x64 ../
 
 clean :
 	cd src; make clean
 
 distclean : clean
 	-rm jlc_x64
+	-rm jlc
 	cd src && make distclean
 
 # EOF

@@ -325,6 +325,24 @@ checkStm env val x main = case x of
     if (typ == Int || typ == Doub)
       then return (env, Retting x 0)
       else  Bad ( "type " ++ printTree typ ++ "of variable " ++ show id ++ " cant be decremented" )
+
+  AssIndex id e1 e2 -> do
+    t <- lookupVar env id
+    t' <- case t of
+            List t'' -> return t''
+            _        -> Bad "can not assign element of non list type" 
+    checkExp env Int e1
+    checkExp env t' e2
+    e1' <- inferExp env e1
+    e2' <- inferExp env e2
+    return (env, Retting (AssIndex id e1' e2') 0)
+
+  SFor t id e s -> do
+    checkExp env (List t) e
+    e'      <- inferExp env e
+    env' <- addVar env id t 
+    (env'', s') <- checkStm env' val s main
+    return (env, Retting (SFor t id e' s') 0)
   
   Empty -> return (env, Retting x 0)
 
@@ -343,7 +361,7 @@ checkExp env typ exp = do
   if (typ2 == typ)
     then return typ
     else
-      Bad ( "type of " ++ printTree exp ++ " expected " ++ printTree typ ++ " but found " ++ printTree typ2 )
+      Bad ( "type of " ++ printTree exp ++ " expected " ++ printTree typ ++ " but found " ++ printTree typ2 ++ show exp)
 
 
 
@@ -421,6 +439,30 @@ inferExp env x = case x of
     checkExp env Bool exp
     exp' <- inferExp env exp 
     return (ETyped (Not exp') Bool)
+
+  EList t exp -> do
+    case t of
+      List _ -> Bad $ "cant have list of lists: type is" ++ printTree t
+      _      -> return ()
+    checkExp env Int exp
+    exp' <- inferExp env exp
+    return (ETyped (EList t exp') (List t))
+
+  ELen exp -> do
+    (exp', t) <- inferExp env exp >>= unwrap
+    case t of
+      List _      -> return ()
+      _ -> Bad $ "cant have list of lists: type is" ++ printTree t
+    return (ETyped (ELen exp') Int)
+
+  EElem e1 e2 -> do
+    (e1', t1) <- inferExp env e1 >>= unwrap
+    t' <- case t1 of
+              List t1' -> return t1'
+              _        -> Bad "can only index lists"
+    checkExp env Int e2
+    e2' <- inferExp env e2
+    return (ETyped (EElem e1' e2') t')
     
   ETyped e t -> inferExp env e
 
