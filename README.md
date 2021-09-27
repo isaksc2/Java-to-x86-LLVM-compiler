@@ -16,3 +16,4 @@ These are the essential steps of optimization algorithm:
 * Then we update the code with the mapping of virtual registers to physical registers. 
 
 you can see the code [here](https://github.com/isaksc2/TDA283/blob/main/compiler/src/X86Backend.hs). 
+ 
